@@ -1,9 +1,3 @@
-"""
-puf/metrics.py — PUF quality metrics (Maiti & Schaumont 2011, IEEE Trans. VLSI)
-
-Uniformidade é medida no nível de POPULAÇÃO (Eq. 3 do paper),
-não por dispositivo individual.
-"""
 import numpy as np
 from itertools import combinations
 
@@ -56,20 +50,34 @@ class PUFMetrics:
         rel_ok   = all(r["passed"] for r in rels)
         unif     = PUFMetrics.uniformity_population(enrollment)
         overall  = u["passed"] and rel_ok and unif["passed"]
+
         if verbose:
+            u_ok   = "OK" if u["passed"]    else "FAIL"
+            r_ok   = "OK" if rel_ok         else "FAIL"
+            un_ok  = "OK" if unif["passed"] else "FAIL"
+            ov_ok  = "PASSED" if overall    else "FAILED"
             sep = "=" * 60
-            print(sep); print("PUF QUALITY REPORT"); print(sep)
-            print(f"Devices evaluated : {len(signatures_per_device)}")
-            print(f"Bits per signature: {len(enrollment[0])}")
             print(sep)
-            print(f"Uniqueness   : {u['mean']:.3f} \u00b1 {u['std']:.3f}  (ideal ~0.50)  {'\u2713' if u['passed'] else '\u2717'}")
-            print(f"Reliability  : {mean_rel:.3f} (min {min_rel:.3f})  (ideal >0.90)  {'\u2713' if rel_ok else '\u2717'}")
-            print(f"Uniformity   : {unif['population_mean']:.3f}  [per-device std={unif['per_device_std']:.3f}]  (ideal ~0.50)  {'\u2713' if unif['passed'] else '\u2717'}")
+            print("PUF QUALITY REPORT")
+            print(sep)
+            print("Devices evaluated : " + str(len(signatures_per_device)))
+            print("Bits per signature: " + str(len(enrollment[0])))
+            print(sep)
+            print("Uniqueness   : " + str(u["mean"]) + " +/- " + str(u["std"]) +
+                  "  (ideal ~0.50)  [" + u_ok + "]")
+            print("Reliability  : " + str(mean_rel) + " (min " + str(min_rel) + ")" +
+                  "  (ideal >0.90)  [" + r_ok + "]")
+            print("Uniformity   : " + str(unif["population_mean"]) +
+                  "  [per-device std=" + str(unif["per_device_std"]) + "]" +
+                  "  (ideal ~0.50)  [" + un_ok + "]")
             if unif["n_devices_outside_45_55"] > 0:
-                print(f"             \u2192 {unif['n_devices_outside_45_55']} disp. com uniformidade individual fora de [0.45,0.55]")
-                print(f"             \u2192 Normal para PUFs com offset f\u00edsico (ver Maiti 2011)")
+                print("             -> " + str(unif["n_devices_outside_45_55"]) +
+                      " disp. com uniformidade individual fora de [0.45, 0.55]")
+                print("             -> Normal para PUFs com offset fisico (Maiti 2011)")
             print("-" * 60)
-            print(f"Overall      : {'PASSED \u2713' if overall else 'FAILED \u2717'}")
+            print("Overall      : " + ov_ok)
             print(sep)
-        return {"uniqueness": u, "reliability": {"mean": mean_rel, "min": min_rel, "passed": rel_ok},
+
+        return {"uniqueness": u,
+                "reliability": {"mean": mean_rel, "min": min_rel, "passed": rel_ok},
                 "uniformity": unif, "overall_passed": overall}
