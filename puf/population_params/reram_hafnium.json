@@ -1,0 +1,28 @@
+{
+  "_metadata": {
+    "primary_source": "Falcone et al. 2025, arXiv:2502.04524",
+    "hardware": "IBM CMO/HfOx ReRAM, IBM Research Europe - Zurich"
+  },
+  "conductance_range": {
+    "g_min_uS": 8.0,
+    "g_max_uS": 100.0
+  },
+  "inter_device": {
+    "g_prog_offset": {
+      "mu_uS": 0.0,
+      "sigma_uS": 0.22
+    },
+    "drift_mu_offset": {
+      "mu": 0.0,
+      "sigma": 0.008
+    },
+    "drift_sigma_scale": {
+      "mu_scale": 1.0,
+      "sigma_scale": 0.09
+    },
+    "read_noise_scale": {
+      "mu_scale": 1.0,
+      "sigma_scale": 0.06
+    }
+  }
+}

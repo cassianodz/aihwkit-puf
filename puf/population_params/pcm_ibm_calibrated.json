@@ -1,0 +1,43 @@
+{
+  "_metadata": {
+    "primary_source": "Joshi et al. 2020, Nature Communications 11, 2473",
+    "arxiv": "https://arxiv.org/abs/1906.03138",
+    "secondary_source": "Le Gallo et al. 2018, Advanced Electronic Materials 4, 1700627",
+    "hardware": "IBM PCM 90nm CMOS Ge2Sb2Te5 1M devices",
+    "puf_note": "g_prog_offset sigma=0.5 uS = single-shot regime. Iterative programming yields 0.038 uS. PUF requires single-shot to preserve uniqueness."
+  },
+  "conductance_range": {
+    "g_min_uS": 0.0,
+    "g_max_uS": 25.0,
+    "puf_challenge_range_uS": [
+      0.3,
+      1.7
+    ],
+    "puf_challenge_note": "Noise polynomial non-zero only for g_T < 2 uS."
+  },
+  "inter_device": {
+    "g_prog_offset": {
+      "mu_uS": 0.0,
+      "sigma_uS": 0.5,
+      "note": "Single-shot; iterative gives 0.038 uS"
+    },
+    "drift_nu_offset": {
+      "mu": 0.0,
+      "sigma": 0.012,
+      "source": "Le Gallo 2018 Fig.4"
+    },
+    "Qs_scale_offset": {
+      "mu_scale": 1.0,
+      "sigma_scale": 0.07,
+      "source": "Joshi 2020 Fig.4b"
+    }
+  },
+  "intra_device_noise_polynomial": {
+    "note": "sigma_prog = max(-1.1731*g_T^2 + 1.9650*g_T + 0.2635, 0)",
+    "coefficients": [
+      -1.1731,
+      1.965,
+      0.2635
+    ]
+  }
+}
