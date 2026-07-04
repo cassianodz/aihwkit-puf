@@ -170,3 +170,8 @@ cython_debug/
 .codex
 CLAUDE.md
 AGENT.md
+sentinel_puf_results.json
+sentinel_puf_results.png
+dataset.txt
+__pycache__/
+*.pyc
