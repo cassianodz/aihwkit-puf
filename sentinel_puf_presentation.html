@@ -7,7 +7,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/recharts/2.8.0/Recharts.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
 body{background:#0f172a;color:#f1f5f9;font-family:system-ui,-apple-system,sans-serif;min-height:100vh;}
@@ -17,48 +16,46 @@ header h1{font-size:18px;font-weight:600;color:#f1f5f9;letter-spacing:-.3px;}
 header p{font-size:12px;color:#64748b;margin-top:3px;}
 .tabs{display:flex;gap:0;border-bottom:1px solid #1e293b;background:#0f172a;padding:0 24px;}
 .tab{padding:10px 20px;font-size:13px;font-weight:500;background:transparent;border:none;
-  color:#64748b;cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;}
+ color:#64748b;cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;}
 .tab:hover{color:#94a3b8;}
 .tab.active{color:#3b82f6;border-bottom-color:#3b82f6;}
 .panel{display:none;flex:1;padding:20px 28px;overflow-y:auto;}
 .panel.active{display:block;}
 button{background:#1e293b;color:#f1f5f9;border:1px solid #334155;border-radius:6px;
-  padding:6px 12px;font-size:12px;cursor:pointer;transition:all .15s;}
+ padding:6px 12px;font-size:12px;cursor:pointer;transition:all .15s;}
 button:hover{background:#334155;}
 button.primary{background:#2563eb;border-color:#2563eb;color:white;}
 button.primary:hover{background:#1d4ed8;}
 button.danger{background:#dc2626;border-color:#dc2626;color:white;}
 select{background:#1e293b;color:#f1f5f9;border:1px solid #334155;border-radius:6px;
-  padding:5px 8px;font-size:12px;cursor:pointer;}
+ padding:5px 8px;font-size:12px;cursor:pointer;}
 .card{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:14px;}
 .chip{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:4px;font-size:11px;font-weight:500;}
 .metric{font-size:24px;font-weight:600;}
 input[type=range]{accent-color:#3b82f6;}
 textarea{background:#0f172a;color:#f1f5f9;border:1px solid #334155;border-radius:6px;
-  padding:10px;font-size:12px;font-family:monospace;width:100%;resize:vertical;}
+ padding:10px;font-size:12px;font-family:monospace;width:100%;resize:vertical;}
 </style>
 </head>
 <body>
 <div id="root"></div>
-<script type="text/babel">
+<script>
+const el = React.createElement;
 const { useState, useEffect, useRef, useCallback, useMemo } = React;
-const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
-        ResponsiveContainer, ReferenceLine, BarChart, Bar, Legend } = Recharts;
+const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, BarChart, Bar, Legend } = Recharts;
 
-// ── Constants ────────────────────────────────────────────────────────────────
 const ROUNDS=200, NC=20, BAD=new Set([15,16,17,18,19]);
 const NW=520, NH=400, CX=NW/2, CY=NH/2;
 const SDN={x:CX,y:50}, AGG={x:CX,y:NH-44};
 const SCENARIOS=[
-  {id:'baseline',label:'1. Baseline',     sub:'FedAvg honesto',   lc:'#6b7280',asr:7,  acc:86.6},
-  {id:'attack',  label:'2. Ataque',       sub:'Weight Scaling',   lc:'#dc2626',asr:100,acc:53.3},
+  {id:'baseline',label:'1. Baseline',sub:'FedAvg honesto',lc:'#6b7280',asr:7,acc:86.6},
+  {id:'attack',label:'2. Ataque',sub:'Weight Scaling',lc:'#dc2626',asr:100,acc:53.3},
   {id:'sentinel',label:'3. Sentinel-Flow',sub:'Canary attestation',lc:'#2563eb',asr:6.7,acc:94.3},
-  {id:'puf',     label:'4. SF + PUF',     sub:'Hardware + Canary',lc:'#7c3aed',asr:6.5,acc:94.3},
+  {id:'puf',label:'4. SF + PUF',sub:'Hardware + Canary',lc:'#7c3aed',asr:6.5,acc:94.3},
 ];
 let PID=0;
 const PC={canary:'#d97706',puf:'#2563eb',weights:'#7c3aed'};
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
 function cpos(i){const a=(i/NC)*2*Math.PI-Math.PI/2;return{x:CX+160*Math.cos(a),y:CY+8+118*Math.sin(a)};}
 function lerp(a,b,t){return{x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t};}
 function ncol(n,sc){
@@ -89,64 +86,50 @@ function simTick(r,sc,nodes){
     blockedBeh:updated.filter(n=>n.blocked).length};
 }
 
-// ── Network SVG Component ────────────────────────────────────────────────────
 function NetworkSVG({nodes,parts,sc,round,stats,svgRef,onDrag}){
   const clients=nodes.filter(n=>n.clientId!==undefined);
   const gpos=id=>id==='sdn'?SDN:id==='agg'?AGG:(nodes.find(n=>n.id===id)?.pos||SDN);
-  return(
-    <svg ref={svgRef} viewBox={`0 0 ${NW} ${NH}`} width="100%" style={{display:'block',userSelect:'none'}}>
-      {clients.map(n=>(
-        <g key={`e${n.id}`}>
-          <line x1={SDN.x} y1={SDN.y} x2={n.pos.x} y2={n.pos.y}
-            stroke={n.blocked?'#dc262640':'#33415566'} strokeWidth={n.blocked?1.2:.6}
-            strokeDasharray={n.blocked?'3,3':undefined}/>
-          <line x1={n.pos.x} y1={n.pos.y} x2={AGG.x} y2={AGG.y}
-            stroke="#33415544" strokeWidth={.5} opacity={n.blocked?.2:.5}/>
-        </g>
-      ))}
-      {parts.map(p=>{
-        const f=gpos(p.from),t=gpos(p.to); if(!f||!t)return null;
-        const pp=lerp(f,t,Math.min(p.prog,.99));
-        return <circle key={p.id} cx={pp.x} cy={pp.y} r={p.type==='weights'?2.2:3} fill={PC[p.type]} opacity={.88}/>;
-      })}
-      {clients.map(n=>{
-        const c=ncol(n,sc),R=13,alpha=n.blocked?.4:(n.trust!=null?.4+n.trust*.6:1);
-        return(
-          <g key={n.id} onMouseDown={e=>onDrag(n.id,e)} style={{cursor:'move'}}>
-            {!n.blocked&&<circle cx={n.pos.x} cy={n.pos.y} r={R+5} fill="none" stroke={c} strokeWidth={1.5} opacity={.18}/>}
-            {sc==='puf'&&!n.blocked&&<circle cx={n.pos.x} cy={n.pos.y} r={R+9} fill="none" stroke="#2563eb" strokeWidth={1} opacity={.13} strokeDasharray="2,4"/>}
-            <rect x={n.pos.x-R} y={n.pos.y-R} width={R*2} height={R*2} rx={2} fill={c} opacity={alpha}/>
-            <line x1={n.pos.x-R} y1={n.pos.y} x2={n.pos.x-R-4} y2={n.pos.y} stroke="white" strokeWidth={.7} opacity={.3}/>
-            <line x1={n.pos.x+R} y1={n.pos.y} x2={n.pos.x+R+4} y2={n.pos.y} stroke="white" strokeWidth={.7} opacity={.3}/>
-            <text x={n.pos.x} y={n.pos.y+1} textAnchor="middle" dominantBaseline="middle" fill="white" fontSize={6.5} fontWeight={500}>
-              {n.blocked?'✕':n.label}
-            </text>
-            {sc==='puf'&&!n.blocked&&!n.isPoisoned&&(n.trust??1)>.65&&
-              <text x={n.pos.x+R} y={n.pos.y-R+1} fill="#16a34a" fontSize={7} fontWeight={700}>✓</text>}
-          </g>
-        );
-      })}
-      <g onMouseDown={e=>onDrag('sdn',e)} style={{cursor:'move'}}>
-        <circle cx={SDN.x} cy={SDN.y} r={28} fill="#1d4ed8"/>
-        <text x={SDN.x} y={SDN.y-6} textAnchor="middle" fill="white" fontSize={9} fontWeight={500}>SDN</text>
-        <text x={SDN.x} y={SDN.y+7} textAnchor="middle" fill="white" fontSize={8} opacity={.85}>Controller</text>
-      </g>
-      <g onMouseDown={e=>onDrag('agg',e)} style={{cursor:'move'}}>
-        <rect x={AGG.x-40} y={AGG.y-17} width={80} height={34} rx={5} fill="#6d28d9"/>
-        <text x={AGG.x} y={AGG.y-3} textAnchor="middle" fill="white" fontSize={9} fontWeight={500}>Aggregator</text>
-        <text x={AGG.x} y={AGG.y+10} textAnchor="middle" fill="white" fontSize={8} opacity={.85}>(FedAvg)</text>
-      </g>
-      {round>0&&<>
-        <rect x={4} y={4} width={130} height={48} rx={4} fill="#0f172a" opacity={.93}/>
-        <text x={10} y={18} fill="#64748b" fontSize={9}>Round {round} / {ROUNDS}</text>
-        <text x={10} y={33} fill="#ef4444" fontSize={10} fontWeight={500}>ASR: {stats.asr}%</text>
-        <text x={10} y={47} fill="#22c55e" fontSize={10} fontWeight={500}>Acc: {stats.acc}%</text>
-      </>}
-    </svg>
+  return el('svg', {ref:svgRef, viewBox:`0 0 ${NW} ${NH}`, width:"100%", style:{display:'block',userSelect:'none'}},
+    clients.map(n=> el('g', {key:`e${n.id}`},
+      el('line', {x1:SDN.x, y1:SDN.y, x2:n.pos.x, y2:n.pos.y, stroke:n.blocked?'#dc262640':'#33415566', strokeWidth:n.blocked?1.2:.6, strokeDasharray:n.blocked?'3,3':undefined}),
+      el('line', {x1:n.pos.x, y1:n.pos.y, x2:AGG.x, y2:AGG.y, stroke:"#33415544", strokeWidth:.5, opacity:n.blocked?.2:.5})
+    )),
+    parts.map(p=>{
+      const f=gpos(p.from), t=gpos(p.to); if(!f||!t)return null;
+      const pp=lerp(f,t,Math.min(p.prog,.99));
+      return el('circle', {key:p.id, cx:pp.x, cy:pp.y, r:p.type==='weights'?2.2:3, fill:PC[p.type], opacity:.88});
+    }),
+    clients.map(n=>{
+      const c=ncol(n,sc), R=13, alpha=n.blocked?.4:(n.trust!=null?.4+n.trust*.6:1);
+      return el('g', {key:n.id, onMouseDown:ev=>onDrag(n.id,ev), style:{cursor:'move'}},
+        !n.blocked ? el('circle', {cx:n.pos.x, cy:n.pos.y, r:R+5, fill:"none", stroke:c, strokeWidth:1.5, opacity:.18}) : null,
+        sc==='puf' && !n.blocked ? el('circle', {cx:n.pos.x, cy:n.pos.y, r:R+9, fill:"none", stroke:"#2563eb", strokeWidth:1, opacity:.13, strokeDasharray:"2,4"}) : null,
+        el('rect', {x:n.pos.x-R, y:n.pos.y-R, width:R*2, height:R*2, rx:2, fill:c, opacity:alpha}),
+        el('line', {x1:n.pos.x-R, y1:n.pos.y, x2:n.pos.x-R-4, y2:n.pos.y, stroke:"white", strokeWidth:.7, opacity:.3}),
+        el('line', {x1:n.pos.x+R, y1:n.pos.y, x2:n.pos.x+R+4, y2:n.pos.y, stroke:"white", strokeWidth:.7, opacity:.3}),
+        el('text', {x:n.pos.x, y:n.pos.y+1, textAnchor:"middle", dominantBaseline:"middle", fill:"white", fontSize:6.5, fontWeight:500}, n.blocked?'✕':n.label),
+        sc==='puf' && !n.blocked && !n.isPoisoned && (n.trust??1)>.65 ? el('text', {x:n.pos.x+R, y:n.pos.y-R+1, fill:"#16a34a", fontSize:7, fontWeight:700}, "✓") : null
+      );
+    }),
+    el('g', {onMouseDown:ev=>onDrag('sdn',ev), style:{cursor:'move'}},
+      el('circle', {cx:SDN.x, cy:SDN.y, r:28, fill:"#1d4ed8"}),
+      el('text', {x:SDN.x, y:SDN.y-6, textAnchor:"middle", fill:"white", fontSize:9, fontWeight:500}, "SDN"),
+      el('text', {x:SDN.x, y:SDN.y+7, textAnchor:"middle", fill:"white", fontSize:8, opacity:.85}, "Controller")
+    ),
+    el('g', {onMouseDown:ev=>onDrag('agg',ev), style:{cursor:'move'}},
+      el('rect', {x:AGG.x-40, y:AGG.y-17, width:80, height:34, rx:5, fill:"#6d28d9"}),
+      el('text', {x:AGG.x, y:AGG.y-3, textAnchor:"middle", fill:"white", fontSize:9, fontWeight:500}, "Aggregator"),
+      el('text', {x:AGG.x, y:AGG.y+10, textAnchor:"middle", fill:"white", fontSize:8, opacity:.85}, "(FedAvg)")
+    ),
+    round>0 ? el(React.Fragment, null,
+      el('rect', {x:4, y:4, width:130, height:48, rx:4, fill:"#0f172a", opacity:.93}),
+      el('text', {x:10, y:18, fill:"#64748b", fontSize:9}, `Round ${round} / ${ROUNDS}`),
+      el('text', {x:10, y:33, fill:"#ef4444", fontSize:10, fontWeight:500}, `ASR: ${stats.asr}%`),
+      el('text', {x:10, y:47, fill:"#22c55e", fontSize:10, fontWeight:500}, `Acc: ${stats.acc}%`)
+    ) : null
   );
 }
 
-// ── Tab 1: Live Simulation ───────────────────────────────────────────────────
 function LiveSim({realData}){
   const[nodes,setNodes]=useState(mkNodes);
   const[running,setRunning]=useState(false);
@@ -197,7 +180,7 @@ function LiveSim({realData}){
   const drag=useCallback((nodeId,e0)=>{
     e0.preventDefault();const svg=svgRef.current;if(!svg)return;
     const pt=svg.createSVGPoint();
-    const mv=(e)=>{pt.x=e.clientX;pt.y=e.clientY;const p=pt.matrixTransform(svg.getScreenCTM().inverse());
+    const mv=(ev)=>{pt.x=ev.clientX;pt.y=ev.clientY;const p=pt.matrixTransform(svg.getScreenCTM().inverse());
       nRef.current=nRef.current.map(n=>n.id===nodeId?{...n,pos:{x:p.x,y:p.y}}:n);setNodes([...nRef.current]);};
     const up=()=>{document.removeEventListener('mousemove',mv);document.removeEventListener('mouseup',up);};
     document.addEventListener('mousemove',mv);document.addEventListener('mouseup',up);
@@ -205,122 +188,107 @@ function LiveSim({realData}){
 
   const addChip=(type)=>{
     const a=Math.random()*2*Math.PI;
-    const n={id:`cx_${Date.now()}`,clientId:nRef.current.filter(n=>n.clientId!==undefined).length,
+    const n={id:`cx_${Date.now()}`,clientId:nRef.current.filter(nd=>nd.clientId!==undefined).length,
       label:'C+',isPoisoned:type==='att',pos:{x:CX+145*Math.cos(a),y:CY+105*Math.sin(a)},trust:1,blocked:false};
     nRef.current=[...nRef.current,n];setNodes([...nRef.current]);
   };
 
-  // If real data exists for this scenario, show it alongside simulation
   const realScen=realData&&realData.scenarios&&realData.scenarios[sc];
   const chartData=realScen?
     realScen.history.map((h,i)=>({round:h.round,asr:h.asr,acc:hist[i]?.acc})):
     hist;
 
-  return(
-    <div style={{display:'grid',gridTemplateColumns:'1fr 280px',gap:16}}>
-      <div>
-        <div style={{display:'flex',gap:8,marginBottom:10,flexWrap:'wrap',alignItems:'center'}}>
-          {SCENARIOS.map(s=>(
-            <button key={s.id} onClick={()=>{reset();setTimeout(()=>setSc(s.id),20);}}
-              style={{fontSize:12,background:sc===s.id?s.lc+'33':'#1e293b',
-                borderColor:sc===s.id?s.lc:'#334155',color:sc===s.id?s.lc:'#94a3b8'}}>
-              <span style={{fontWeight:600}}>{s.label}</span>
-              <span style={{color:'#64748b',marginLeft:4,fontSize:11}}>{s.sub}</span>
-            </button>
-          ))}
-        </div>
-        <div style={{display:'flex',gap:8,marginBottom:8,alignItems:'center'}}>
-          <span style={{fontSize:11,color:'#64748b'}}>Add:</span>
-          {[['pcm','PCM','#16a34a'],['rem','ReRAM','#2563eb'],['att','Attacker','#dc2626']].map(([t,l,c])=>(
-            <button key={t} onClick={()=>addChip(t)} style={{fontSize:11,display:'flex',alignItems:'center',gap:4}}>
-              <span style={{width:8,height:8,borderRadius:1,background:c,display:'inline-block'}}/> + {l}
-            </button>
-          ))}
-          <div style={{marginLeft:'auto',display:'flex',gap:8,alignItems:'center'}}>
-            <span style={{fontSize:12,color:'#64748b'}}>Round <strong style={{color:'#f1f5f9'}}>{round}</strong>/200</span>
-            <button onClick={()=>setRunning(r=>!r)} className={running?'':'primary'}>
-              {running?'⏸ Pause':'▶ Run'}
-            </button>
-            <button onClick={reset}>↺ Reset</button>
-            <select value={speed} onChange={e=>setSpeed(+e.target.value)}>
-              <option value={1}>1×</option><option value={3}>3×</option>
-              <option value={8}>8×</option><option value={25}>25×</option>
-            </select>
-          </div>
-        </div>
-        <div style={{border:'1px solid #1e293b',borderRadius:10,overflow:'hidden',background:'#0f172a'}}>
-          <NetworkSVG nodes={nodes} parts={parts} sc={sc} round={round} stats={stats} svgRef={svgRef} onDrag={drag}/>
-        </div>
-        <div style={{display:'flex',gap:8,marginTop:8,flexWrap:'wrap'}}>
-          {[{l:'Approved',v:stats.approved,c:'#22c55e'},{l:'Blocked',v:stats.blockedBeh,c:'#ef4444'},{l:'Clients',v:nodes.filter(n=>n.clientId!==undefined).length,c:'#94a3b8'}].map(s=>(
-            <div key={s.l} className="chip" style={{background:'#1e293b',border:'1px solid #334155'}}>
-              <span style={{color:'#64748b'}}>{s.l}:</span>
-              <strong style={{color:s.c}}>{s.v}</strong>
-            </div>
-          ))}
-          <div style={{marginLeft:'auto',fontSize:11,color:'#64748b',display:'flex',gap:10,alignItems:'center'}}>
-            <span style={{color:'#d97706'}}>● Canary</span>
-            {sc==='puf'&&<span style={{color:'#2563eb'}}>● PUF</span>}
-            <span style={{color:'#7c3aed'}}>● Weights</span>
-          </div>
-        </div>
-      </div>
-      <div style={{display:'flex',flexDirection:'column',gap:12}}>
-        <div className="card">
-          <p style={{fontSize:11,fontWeight:500,color:'#94a3b8',marginBottom:8}}>
-            Attack Success Rate (%)
-            {realScen&&<span style={{color:'#f59e0b',marginLeft:6,fontSize:10}}>● real data</span>}
-          </p>
-          <div style={{height:140}}>
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData} margin={{top:2,right:4,bottom:0,left:0}}>
-                <CartesianGrid strokeDasharray="2 2" stroke="#1e293b"/>
-                <XAxis dataKey="round" tick={{fontSize:9,fill:'#64748b'}} domain={[0,200]} type="number" tickCount={5}/>
-                <YAxis domain={[0,100]} tick={{fontSize:9,fill:'#64748b'}} width={26}/>
-                <Tooltip formatter={v=>[v?.toFixed(1)+'%','ASR']} labelFormatter={v=>`Round ${v}`}
-                  contentStyle={{background:'#1e293b',border:'1px solid #334155',fontSize:11}}/>
-                <ReferenceLine y={60} stroke="#334155" strokeDasharray="3 2" label={{value:'τ=60%',fill:'#64748b',fontSize:9}}/>
-                <Line dataKey="asr" stroke="#ef4444" dot={false} strokeWidth={2} isAnimationActive={false}/>
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-        <div className="card">
-          <p style={{fontSize:11,fontWeight:500,color:'#94a3b8',marginBottom:8}}>NIDS Accuracy (%)</p>
-          <div style={{height:140}}>
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={hist} margin={{top:2,right:4,bottom:0,left:0}}>
-                <CartesianGrid strokeDasharray="2 2" stroke="#1e293b"/>
-                <XAxis dataKey="round" tick={{fontSize:9,fill:'#64748b'}} domain={[0,200]} type="number" tickCount={5}/>
-                <YAxis domain={[40,100]} tick={{fontSize:9,fill:'#64748b'}} width={26}/>
-                <Tooltip formatter={v=>[v?.toFixed(1)+'%','Acc']} labelFormatter={v=>`Round ${v}`}
-                  contentStyle={{background:'#1e293b',border:'1px solid #334155',fontSize:11}}/>
-                <Line dataKey="acc" stroke="#22c55e" dot={false} strokeWidth={2} isAnimationActive={false}/>
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-        <div className="card">
-          <p style={{fontSize:12,fontWeight:500,marginBottom:6}}>{SCENARIOS.find(s=>s.id===sc)?.label}</p>
-          <p style={{fontSize:11,color:'#64748b',lineHeight:1.6}}>
-            {sc==='baseline'&&'FedAvg honesto. ASR converge para ~7%. Referência de desempenho.'}
-            {sc==='attack'&&'Clean-label poisoning + weight scaling (×4). 5 de 20 clientes comprometidos. ASR sobe para 100%.'}
-            {sc==='sentinel'&&'Canary flows injetados pelo SDN. Clientes com trust < 60% bloqueados. ASR retorna ao baseline.'}
-            {sc==='puf'&&'PCM PUF challenge-response + canary comportamental. Defesa dupla: hardware físico + comportamento.'}
-          </p>
-          {round===ROUNDS&&(
-            <div style={{marginTop:10,padding:10,background:'#0f172a',borderRadius:6,display:'flex',gap:20}}>
-              <div><p style={{fontSize:10,color:'#64748b'}}>Accuracy</p><p className="metric" style={{color:'#22c55e'}}>{stats.acc}%</p></div>
-              <div><p style={{fontSize:10,color:'#64748b'}}>ASR</p><p className="metric" style={{color:'#ef4444'}}>{stats.asr}%</p></div>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
+  return el('div', {style:{display:'grid',gridTemplateColumns:'1fr 280px',gap:16}},
+    el('div', null,
+      el('div', {style:{display:'flex',gap:8,marginBottom:10,flexWrap:'wrap',alignItems:'center'}},
+        SCENARIOS.map(s=>
+          el('button', {key:s.id, onClick:()=>{reset();setTimeout(()=>setSc(s.id),20);}, style:{fontSize:12,background:sc===s.id?s.lc+'33':'#1e293b', borderColor:sc===s.id?s.lc:'#334155',color:sc===s.id?s.lc:'#94a3b8'}},
+            el('span', {style:{fontWeight:600}}, s.label),
+            el('span', {style:{color:'#64748b',marginLeft:4,fontSize:11}}, s.sub)
+          )
+        )
+      ),
+      el('div', {style:{display:'flex',gap:8,marginBottom:8,alignItems:'center'}},
+        el('span', {style:{fontSize:11,color:'#64748b'}}, "Add:"),
+        [['pcm','PCM','#16a34a'],['rem','ReRAM','#2563eb'],['att','Attacker','#dc2626']].map(([t,l,c])=>
+          el('button', {key:t, onClick:()=>addChip(t), style:{fontSize:11,display:'flex',alignItems:'center',gap:4}},
+            el('span', {style:{width:8,height:8,borderRadius:1,background:c,display:'inline-block'}}), ` + ${l}`
+          )
+        ),
+        el('div', {style:{marginLeft:'auto',display:'flex',gap:8,alignItems:'center'}},
+          el('span', {style:{fontSize:12,color:'#64748b'}}, "Round ", el('strong', {style:{color:'#f1f5f9'}}, round), "/200"),
+          el('button', {onClick:()=>setRunning(r=>!r), className:running?'':'primary'}, running?'⏸ Pause':'▶ Run'),
+          el('button', {onClick:reset}, "↺ Reset"),
+          el('select', {value:speed, onChange:ev=>setSpeed(+ev.target.value)},
+            el('option', {value:1}, "1×"), el('option', {value:3}, "3×"),
+            el('option', {value:8}, "8×"), el('option', {value:25}, "25×")
+          )
+        )
+      ),
+      el('div', {style:{border:'1px solid #1e293b',borderRadius:10,overflow:'hidden',background:'#0f172a'}},
+        el(NetworkSVG, {nodes:nodes, parts:parts, sc:sc, round:round, stats:stats, svgRef:svgRef, onDrag:drag})
+      ),
+      el('div', {style:{display:'flex',gap:8,marginTop:8,flexWrap:'wrap'}},
+        [{l:'Approved',v:stats.approved,c:'#22c55e'},{l:'Blocked',v:stats.blockedBeh,c:'#ef4444'},{l:'Clients',v:nodes.filter(nd=>nd.clientId!==undefined).length,c:'#94a3b8'}].map(s=>
+          el('div', {key:s.l, className:"chip", style:{background:'#1e293b',border:'1px solid #334155'}},
+            el('span', {style:{color:'#64748b'}}, s.l, ":"),
+            el('strong', {style:{color:s.c}}, s.v)
+          )
+        ),
+        el('div', {style:{marginLeft:'auto',fontSize:11,color:'#64748b',display:'flex',gap:10,alignItems:'center'}},
+          el('span', {style:{color:'#d97706'}}, "● Canary"),
+          sc==='puf' ? el('span', {style:{color:'#2563eb'}}, "● PUF") : null,
+          el('span', {style:{color:'#7c3aed'}}, "● Weights")
+        )
+      )
+    ),
+    el('div', {style:{display:'flex',flexDirection:'column',gap:12}},
+      el('div', {className:"card"},
+        el('p', {style:{fontSize:11,fontWeight:500,color:'#94a3b8',marginBottom:8}}, "Attack Success Rate (%)", realScen?el('span',{style:{color:'#f59e0b',marginLeft:6,fontSize:10}},"● real data"):null),
+        el('div', {style:{height:140}},
+          el(ResponsiveContainer, {width:"100%", height:"100%"},
+            el(LineChart, {data:chartData, margin:{top:2,right:4,bottom:0,left:0}},
+              el(CartesianGrid, {strokeDasharray:"2 2", stroke:"#1e293b"}),
+              el(XAxis, {dataKey:"round", tick:{fontSize:9,fill:'#64748b'}, domain:[0,200], type:"number", tickCount:5}),
+              el(YAxis, {domain:[0,100], tick:{fontSize:9,fill:'#64748b'}, width:26}),
+              el(Tooltip, {formatter:v=>[v?.toFixed(1)+'%','ASR'], labelFormatter:v=>`Round ${v}`, contentStyle:{background:'#1e293b',border:'1px solid #334155',fontSize:11}}),
+              el(ReferenceLine, {y:60, stroke:"#334155", strokeDasharray:"3 2", label:{value:'τ=60%',fill:'#64748b',fontSize:9}}),
+              el(Line, {dataKey:"asr", stroke:"#ef4444", dot:false, strokeWidth:2, isAnimationActive:false})
+            )
+          )
+        )
+      ),
+      el('div', {className:"card"},
+        el('p', {style:{fontSize:11,fontWeight:500,color:'#94a3b8',marginBottom:8}}, "NIDS Accuracy (%)"),
+        el('div', {style:{height:140}},
+          el(ResponsiveContainer, {width:"100%", height:"100%"},
+            el(LineChart, {data:hist, margin:{top:2,right:4,bottom:0,left:0}},
+              el(CartesianGrid, {strokeDasharray:"2 2", stroke:"#1e293b"}),
+              el(XAxis, {dataKey:"round", tick:{fontSize:9,fill:'#64748b'}, domain:[0,200], type:"number", tickCount:5}),
+              el(YAxis, {domain:[40,100], tick:{fontSize:9,fill:'#64748b'}, width:26}),
+              el(Tooltip, {formatter:v=>[v?.toFixed(1)+'%','Acc'], labelFormatter:v=>`Round ${v}`, contentStyle:{background:'#1e293b',border:'1px solid #334155',fontSize:11}}),
+              el(Line, {dataKey:"acc", stroke:"#22c55e", dot:false, strokeWidth:2, isAnimationActive:false})
+            )
+          )
+        )
+      ),
+      el('div', {className:"card"},
+        el('p', {style:{fontSize:12,fontWeight:500,marginBottom:6}}, SCENARIOS.find(s=>s.id===sc)?.label),
+        el('p', {style:{fontSize:11,color:'#64748b',lineHeight:1.6}},
+          sc==='baseline'?'FedAvg honesto. ASR converge para ~7%. Referência de desempenho.':
+          sc==='attack'?'Clean-label poisoning + weight scaling (×4). 5 de 20 clientes comprometidos. ASR sobe para 100%.':
+          sc==='sentinel'?'Canary flows injetados pelo SDN. Clientes com trust < 60% bloqueados. ASR retorna ao baseline.':
+          sc==='puf'?'PCM PUF challenge-response + canary comportamental. Defesa dupla: hardware físico + comportamento.':''
+        ),
+        round===ROUNDS ? el('div', {style:{marginTop:10,padding:10,background:'#0f172a',borderRadius:6,display:'flex',gap:20}},
+          el('div', null, el('p', {style:{fontSize:10,color:'#64748b'}}, "Accuracy"), el('p', {className:"metric", style:{color:'#22c55e'}}, stats.acc, "%")),
+          el('div', null, el('p', {style:{fontSize:10,color:'#64748b'}}, "ASR"), el('p', {className:"metric", style:{color:'#ef4444'}}, stats.asr, "%"))
+        ) : null
+      )
+    )
   );
 }
 
-// ── Tab 2: Results Dashboard ─────────────────────────────────────────────────
 function Dashboard({realData}){
   const paperResults=[
     {scenario:'Baseline',accuracy:86.6,asr:7.2},
@@ -336,70 +304,62 @@ function Dashboard({realData}){
 
   const accData=displayResults.map(r=>({name:r.scenario.replace('Sentinel-Flow','SF'),accuracy:r.accuracy}));
   const asrData=displayResults.map(r=>({name:r.scenario.replace('Sentinel-Flow','SF'),asr:r.asr}));
-
   const lc=['#6b7280','#dc2626','#2563eb','#7c3aed'];
 
-  return(
-    <div>
-      <div style={{marginBottom:16}}>
-        <h3 style={{fontSize:15,fontWeight:500,marginBottom:4}}>Resultados Finais</h3>
-        <p style={{fontSize:12,color:'#64748b'}}>
-          {realData?'Dados reais do experimento Python carregados.':'Valores do artigo (Zago et al. 2025). Importe dados reais na aba "Importar Dados".'}
-        </p>
-      </div>
-      <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12,marginBottom:20}}>
-        {displayResults.map((r,i)=>(
-          <div key={r.scenario} className="card" style={{borderColor:lc[i]+'55'}}>
-            <p style={{fontSize:11,color:lc[i],fontWeight:600,marginBottom:8}}>{r.scenario}</p>
-            <div style={{marginBottom:6}}>
-              <p style={{fontSize:10,color:'#64748b'}}>Accuracy</p>
-              <p className="metric" style={{color:r.accuracy>80?'#22c55e':'#ef4444'}}>{r.accuracy}%</p>
-            </div>
-            <div>
-              <p style={{fontSize:10,color:'#64748b'}}>ASR</p>
-              <p className="metric" style={{color:r.asr<20?'#22c55e':'#ef4444'}}>{r.asr}%</p>
-            </div>
-            <p style={{fontSize:11,marginTop:8,color:r.asr<20&&r.accuracy>80?'#22c55e':'#ef4444'}}>
-              {r.asr<20&&r.accuracy>80?'✓ Defendido':'⚠ Comprometido'}
-            </p>
-          </div>
-        ))}
-      </div>
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
-        <div className="card">
-          <p style={{fontSize:12,fontWeight:500,color:'#94a3b8',marginBottom:12}}>Acurácia Global (%)</p>
-          <div style={{height:200}}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={accData} margin={{top:4,right:8,bottom:20,left:0}}>
-                <CartesianGrid strokeDasharray="2 2" stroke="#1e293b"/>
-                <XAxis dataKey="name" tick={{fontSize:10,fill:'#64748b'}} angle={-15} textAnchor="end"/>
-                <YAxis domain={[0,100]} tick={{fontSize:10,fill:'#64748b'}} width={28}/>
-                <Tooltip contentStyle={{background:'#1e293b',border:'1px solid #334155',fontSize:11}}/>
-                <Bar dataKey="accuracy" fill="#3b82f6" radius={[3,3,0,0]}/>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-        <div className="card">
-          <p style={{fontSize:12,fontWeight:500,color:'#94a3b8',marginBottom:12}}>Attack Success Rate (%)</p>
-          <div style={{height:200}}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={asrData} margin={{top:4,right:8,bottom:20,left:0}}>
-                <CartesianGrid strokeDasharray="2 2" stroke="#1e293b"/>
-                <XAxis dataKey="name" tick={{fontSize:10,fill:'#64748b'}} angle={-15} textAnchor="end"/>
-                <YAxis domain={[0,110]} tick={{fontSize:10,fill:'#64748b'}} width={28}/>
-                <Tooltip contentStyle={{background:'#1e293b',border:'1px solid #334155',fontSize:11}}/>
-                <Bar dataKey="asr" fill="#ef4444" radius={[3,3,0,0]}/>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      </div>
-    </div>
+  return el('div', null,
+    el('div', {style:{marginBottom:16}},
+      el('h3', {style:{fontSize:15,fontWeight:500,marginBottom:4}}, "Resultados Finais"),
+      el('p', {style:{fontSize:12,color:'#64748b'}}, realData?'Dados reais do experimento Python carregados.':'Valores do artigo (Zago et al. 2025). Importe dados reais na aba "Importar Dados".')
+    ),
+    el('div', {style:{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12,marginBottom:20}},
+      displayResults.map((r,i)=>
+        el('div', {key:r.scenario, className:"card", style:{borderColor:lc[i]+'55'}},
+          el('p', {style:{fontSize:11,color:lc[i],fontWeight:600,marginBottom:8}}, r.scenario),
+          el('div', {style:{marginBottom:6}},
+            el('p', {style:{fontSize:10,color:'#64748b'}}, "Accuracy"),
+            el('p', {className:"metric", style:{color:r.accuracy>80?'#22c55e':'#ef4444'}}, r.accuracy, "%")
+          ),
+          el('div', null,
+            el('p', {style:{fontSize:10,color:'#64748b'}}, "ASR"),
+            el('p', {className:"metric", style:{color:r.asr<20?'#22c55e':'#ef4444'}}, r.asr, "%")
+          ),
+          el('p', {style:{fontSize:11,marginTop:8,color:r.asr<20&&r.accuracy>80?'#22c55e':'#ef4444'}}, r.asr<20&&r.accuracy>80?'✓ Defendido':'⚠ Comprometido')
+        )
+      )
+    ),
+    el('div', {style:{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}},
+      el('div', {className:"card"},
+        el('p', {style:{fontSize:12,fontWeight:500,color:'#94a3b8',marginBottom:12}}, "Acurácia Global (%)"),
+        el('div', {style:{height:200}},
+          el(ResponsiveContainer, {width:"100%", height:"100%"},
+            el(BarChart, {data:accData, margin:{top:4,right:8,bottom:20,left:0}},
+              el(CartesianGrid, {strokeDasharray:"2 2", stroke:"#1e293b"}),
+              el(XAxis, {dataKey:"name", tick:{fontSize:10,fill:'#64748b'}, angle:-15, textAnchor:"end"}),
+              el(YAxis, {domain:[0,100], tick:{fontSize:10,fill:'#64748b'}, width:28}),
+              el(Tooltip, {contentStyle:{background:'#1e293b',border:'1px solid #334155',fontSize:11}}),
+              el(Bar, {dataKey:"accuracy", fill:"#3b82f6", radius:[3,3,0,0]})
+            )
+          )
+        )
+      ),
+      el('div', {className:"card"},
+        el('p', {style:{fontSize:12,fontWeight:500,color:'#94a3b8',marginBottom:12}}, "Attack Success Rate (%)"),
+        el('div', {style:{height:200}},
+          el(ResponsiveContainer, {width:"100%", height:"100%"},
+            el(BarChart, {data:asrData, margin:{top:4,right:8,bottom:20,left:0}},
+              el(CartesianGrid, {strokeDasharray:"2 2", stroke:"#1e293b"}),
+              el(XAxis, {dataKey:"name", tick:{fontSize:10,fill:'#64748b'}, angle:-15, textAnchor:"end"}),
+              el(YAxis, {domain:[0,110], tick:{fontSize:10,fill:'#64748b'}, width:28}),
+              el(Tooltip, {contentStyle:{background:'#1e293b',border:'1px solid #334155',fontSize:11}}),
+              el(Bar, {dataKey:"asr", fill:"#ef4444", radius:[3,3,0,0]})
+            )
+          )
+        )
+      )
+    )
   );
 }
 
-// ── Tab 3: Sybil Attack ──────────────────────────────────────────────────────
 function SybilTab(){
   const NB=40,FAKE=[15,16,17,18,19],CHIP=99,THR=.9;
   function rng(s){let x=(s*48271+12345)%2147483647;return()=>{x=(x*16807)%2147483647;return x/2147483647;};}
@@ -426,152 +386,111 @@ function SybilTab(){
   const SRV={x:SW/2,y:24},CHIP_POS={x:SW/2,y:SH-32};
   const fpos=(i)=>({x:20+i*(SW-40)/4,y:SH/2+4});
 
-  return(
-    <div>
-      <div style={{marginBottom:16}}>
-        <h3 style={{fontSize:15,fontWeight:500,marginBottom:4}}>Sybil Attack — Por Que PUF É Necessário</h3>
-        <p style={{fontSize:12,color:'#64748b',lineHeight:1.6}}>
-          1 adversário físico controla 5 clientes virtuais com o mesmo chip PCM.
-          Sentinel-Flow comportamental não detecta (todos passam no canary).
-          O PUF analógico detecta porque a assinatura de condutância do Chip 99
-          não bate com nenhum dos 5 dispositivos cadastrados no enrollment.
-        </p>
-      </div>
-      <div style={{display:'grid',gridTemplateColumns:'260px 1fr',gap:16}}>
-        <div>
-          <div style={{border:'1px solid #1e293b',borderRadius:10,overflow:'hidden',background:'#0f172a',marginBottom:12}}>
-            <svg viewBox={`0 0 ${SW} ${SH}`} width="100%" style={{display:'block'}}>
-              <rect x={SRV.x-42} y={SRV.y-14} width={84} height={28} rx={4} fill="#1d4ed8"/>
-              <text x={SRV.x} y={SRV.y} textAnchor="middle" dominantBaseline="middle" fill="white" fontSize={8.5} fontWeight={500}>SDN Server</text>
-              {phase==='challenge'&&<circle cx={SRV.x} cy={SRV.y} r={22} fill="none" stroke="#2563eb" strokeWidth={2} opacity={.5}/>}
-              {FAKE.map((id,i)=>{
-                const p=fpos(i);
-                const blocked=puf&&revealed>i&&comps[i].sim<THR;
-                const accepted=!puf||!(revealed>i);
-                return(<g key={id} style={{cursor:'pointer'}} onClick={()=>setSel(sel===id?null:id)}>
-                  <line x1={SRV.x} y1={SRV.y+14} x2={p.x} y2={p.y-12}
-                    stroke={blocked?'#dc262640':'#16a34a40'} strokeWidth={1} strokeDasharray={blocked?'3,2':undefined} opacity={.7}/>
-                  <rect x={p.x-14} y={p.y-12} width={28} height={22} rx={3}
-                    fill={blocked?'#6b7280':accepted?'#16a34a':'#16a34a'} opacity={.85}
-                    stroke={sel===id?'#f59e0b':undefined} strokeWidth={sel===id?2:0}/>
-                  <text x={p.x} y={p.y-.5} textAnchor="middle" dominantBaseline="middle" fill="white" fontSize={7} fontWeight={500}>C{id}</text>
-                  {revealed>i&&<text x={p.x} y={p.y+17} textAnchor="middle" fill={blocked?'#ef4444':'#22c55e'} fontSize={9} fontWeight={700}>{blocked?'✕':'✓'}</text>}
-                </g>);
-              })}
-              {FAKE.map((id,i)=>{const p=fpos(i);return(
-                <line key={`a${id}`} x1={CHIP_POS.x+(i-2)*5} y1={CHIP_POS.y-10} x2={p.x} y2={p.y+10}
-                  stroke="#f59e0b" strokeWidth={.8} opacity={.5} strokeDasharray="2,3"/>
-              );})}
-              {phase==='challenge'&&<>
-                <line x1={SRV.x} y1={SRV.y+14} x2={CHIP_POS.x} y2={CHIP_POS.y-10} stroke="#2563eb" strokeWidth={1.5} strokeDasharray="4,3" opacity={.8}/>
-                <text x={SRV.x+20} y={(SRV.y+CHIP_POS.y)/2} fill="#2563eb" fontSize={7.5}>challenge →</text>
-              </>}
-              <rect x={CHIP_POS.x-28} y={CHIP_POS.y-11} width={56} height={22} rx={2} fill="#0f172a"/>
-              <rect x={CHIP_POS.x-25} y={CHIP_POS.y-8} width={50} height={16} rx={1} fill="#1e293b"/>
-              <text x={CHIP_POS.x} y={CHIP_POS.y+1} textAnchor="middle" dominantBaseline="middle" fill="#f59e0b" fontSize={6.5} fontWeight={500}>Chip 99 (PCM PUF)</text>
-              <text x={CHIP_POS.x} y={CHIP_POS.y+20} textAnchor="middle" fill="#94a3b8" fontSize={7}>1 atacante físico</text>
-              {phase==='done'&&<>
-                <rect x={4} y={2} width={88} height={17} rx={3} fill="#7c3aed" opacity={.95}/>
-                <text x={48} y={10.5} textAnchor="middle" dominantBaseline="middle" fill="white" fontSize={7.5} fontWeight={500}>PUF: Sybil detectado!</text>
-              </>}
-            </svg>
-          </div>
-          <button onClick={run} style={{width:'100%',padding:'9px',fontSize:13,fontWeight:500,
-            background:puf?'#7c3aed':'#2563eb',borderColor:puf?'#7c3aed':'#2563eb',color:'white'}}>
-            {puf?'↩ Reset':'▶ Ativar PUF Attestation'}
-          </button>
-          <p style={{fontSize:11,color:'#64748b',textAlign:'center',marginTop:6}}>
-            {!puf&&'Sem PUF: todos os 5 aceitos pelo comportamento'}
-            {puf&&phase==='done'&&'Com PUF: 5/5 identidades rejeitadas'}
-          </p>
-        </div>
-        <div>
-          <h4 style={{fontSize:13,fontWeight:500,marginBottom:10}}>Comparação de assinaturas ({NB} bits)</h4>
-          {!puf&&(
-            <div className="card" style={{textAlign:'center',padding:20}}>
-              <p style={{color:'#64748b',marginBottom:12,fontSize:12}}>Sem PUF ativo — todos os 5 clientes aprovados pelo comportamento</p>
-              <div style={{display:'flex',gap:8,justifyContent:'center'}}>
-                {FAKE.map(id=><span key={id} className="chip" style={{background:'#16a34a22',color:'#22c55e',border:'1px solid #16a34a44'}}>C{id} ✓</span>)}
-              </div>
-            </div>
-          )}
-          {puf&&comps.map((c,idx)=>{
-            if(revealed<=idx)return(<div key={c.id} style={{height:70,border:'1px dashed #1e293b',borderRadius:8,marginBottom:8,display:'flex',alignItems:'center',justifyContent:'center',opacity:.4}}>
-              <span style={{fontSize:11,color:'#64748b'}}>C{c.id} — aguardando...</span>
-            </div>);
-            const isSel=sel===c.id,blocked=c.sim<THR;
-            return(<div key={c.id} style={{marginBottom:8,padding:'9px 12px',borderRadius:8,
-              border:`1px solid ${blocked?'#dc262644':'#16a34a44'}`,
-              background:blocked?'#1a0a0a':'#0a1a0a',cursor:'pointer',
-              outline:isSel?'2px solid #f59e0b':undefined}}
-              onClick={()=>setSel(sel===c.id?null:c.id)}>
-              <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:isSel?8:0}}>
-                <strong style={{fontSize:12}}>Device C{c.id}</strong>
-                <span style={{fontSize:11,color:'#64748b'}}>Hamming: {Math.round((1-c.sim)*100)}%</span>
-                <div style={{flex:1,height:5,background:'#1e293b',borderRadius:3,overflow:'hidden'}}>
-                  <div style={{height:'100%',width:(c.sim*100)+'%',background:blocked?'#ef4444':'#22c55e'}}/>
-                </div>
-                <span style={{fontSize:11,fontWeight:600,color:blocked?'#ef4444':'#22c55e'}}>{Math.round(c.sim*100)}%</span>
-                <span style={{fontSize:12,fontWeight:700,color:blocked?'#ef4444':'#22c55e'}}>{blocked?'BLOQUEADO':'ACEITO'}</span>
-              </div>
-              {isSel&&<>
-                <p style={{fontSize:10,color:'#64748b',marginBottom:4}}>Assinatura cadastrada (enrollment):</p>
-                <div style={{display:'flex',gap:1.5,marginBottom:6,flexWrap:'nowrap',overflow:'hidden'}}>
-                  {c.enrolled.slice(0,32).map((b,i)=><span key={i} style={{width:11,height:11,borderRadius:1,display:'inline-block',background:b?'#1d4ed8':'#334155'}}/>)}
-                </div>
-                <p style={{fontSize:10,color:'#f59e0b',marginBottom:4}}>Resposta atual do Chip 99:</p>
-                <div style={{display:'flex',gap:1.5,marginBottom:4,flexWrap:'nowrap',overflow:'hidden'}}>
-                  {sig99.slice(0,32).map((b,i)=><span key={i} style={{width:11,height:11,borderRadius:1,display:'inline-block',background:c.enrolled[i]===b?'#22c55e':'#ef4444'}}/>)}
-                </div>
-                <div style={{fontSize:10,color:'#64748b'}}>
-                  <span style={{background:'#22c55e22',padding:'1px 4px',borderRadius:2,marginRight:4}}>■ match</span>
-                  <span style={{background:'#ef444422',padding:'1px 4px',borderRadius:2}}>■ mismatch</span>
-                </div>
-              </>}
-            </div>);
-          })}
-        </div>
-      </div>
-    </div>
+  return el('div', null,
+    el('div', {style:{marginBottom:16}},
+      el('h3', {style:{fontSize:15,fontWeight:500,marginBottom:4}}, "Sybil Attack — Por Que PUF É Necessário"),
+      el('p', {style:{fontSize:12,color:'#64748b',lineHeight:1.6}}, "1 adversário físico controla 5 clientes virtuais com o mesmo chip PCM. Sentinel-Flow comportamental não detecta (todos passam no canary). O PUF analógico detecta porque a assinatura de condutância do Chip 99 não bate com nenhum dos 5 dispositivos cadastrados no enrollment.")
+    ),
+    el('div', {style:{display:'grid',gridTemplateColumns:'260px 1fr',gap:16}},
+      el('div', null,
+        el('div', {style:{border:'1px solid #1e293b',borderRadius:10,overflow:'hidden',background:'#0f172a',marginBottom:12}},
+          el('svg', {viewBox:`0 0 ${SW} ${SH}`, width:"100%", style:{display:'block'}},
+            el('rect', {x:SRV.x-42, y:SRV.y-14, width:84, height:28, rx:4, fill:"#1d4ed8"}),
+            el('text', {x:SRV.x, y:SRV.y, textAnchor:"middle", dominantBaseline:"middle", fill:"white", fontSize:8.5, fontWeight:500}, "SDN Server"),
+            phase==='challenge' ? el('circle', {cx:SRV.x, cy:SRV.y, r:22, fill:"none", stroke:"#2563eb", strokeWidth:2, opacity:.5}) : null,
+            FAKE.map((id,i)=>{
+              const p=fpos(i);
+              const blocked=puf&&revealed>i&&comps[i].sim<THR;
+              const accepted=!puf||!(revealed>i);
+              return el('g', {key:id, style:{cursor:'pointer'}, onClick:()=>setSel(sel===id?null:id)},
+                el('line', {x1:SRV.x, y1:SRV.y+14, x2:p.x, y2:p.y-12, stroke:blocked?'#dc262640':'#16a34a40', strokeWidth:1, strokeDasharray:blocked?'3,2':undefined, opacity:.7}),
+                el('rect', {x:p.x-14, y:p.y-12, width:28, height:22, rx:3, fill:blocked?'#6b7280':accepted?'#16a34a':'#16a34a', opacity:.85, stroke:sel===id?'#f59e0b':undefined, strokeWidth:sel===id?2:0}),
+                el('text', {x:p.x, y:p.y-.5, textAnchor:"middle", dominantBaseline:"middle", fill:"white", fontSize:7, fontWeight:500}, `C${id}`),
+                revealed>i ? el('text', {x:p.x, y:p.y+17, textAnchor:"middle", fill:blocked?'#ef4444':'#22c55e', fontSize:9, fontWeight:700}, blocked?'✕':'✓') : null
+              );
+            }),
+            FAKE.map((id,i)=>{
+              const p=fpos(i);
+              return el('line', {key:`a${id}`, x1:CHIP_POS.x+(i-2)*5, y1:CHIP_POS.y-10, x2:p.x, y2:p.y+10, stroke:"#f59e0b", strokeWidth:.8, opacity:.5, strokeDasharray:"2,3"});
+            }),
+            phase==='challenge' ? el(React.Fragment, null,
+              el('line', {x1:SRV.x, y1:SRV.y+14, x2:CHIP_POS.x, y2:CHIP_POS.y-10, stroke:"#2563eb", strokeWidth:1.5, strokeDasharray:"4,3", opacity:.8}),
+              el('text', {x:SRV.x+20, y:(SRV.y+CHIP_POS.y)/2, fill:"#2563eb", fontSize:7.5}, "challenge →")
+            ) : null,
+            el('rect', {x:CHIP_POS.x-28, y:CHIP_POS.y-11, width:56, height:22, rx:2, fill:"#0f172a"}),
+            el('rect', {x:CHIP_POS.x-25, y:CHIP_POS.y-8, width:50, height:16, rx:1, fill:"#1e293b"}),
+            el('text', {x:CHIP_POS.x, y:CHIP_POS.y+1, textAnchor:"middle", dominantBaseline:"middle", fill:"#f59e0b", fontSize:6.5, fontWeight:500}, "Chip 99 (PCM PUF)"),
+            el('text', {x:CHIP_POS.x, y:CHIP_POS.y+20, textAnchor:"middle", fill:"#94a3b8", fontSize:7}, "1 atacante físico"),
+            phase==='done' ? el(React.Fragment, null,
+              el('rect', {x:4, y:2, width:88, height:17, rx:3, fill:"#7c3aed", opacity:.95}),
+              el('text', {x:48, y:10.5, textAnchor:"middle", dominantBaseline:"middle", fill:"white", fontSize:7.5, fontWeight:500}, "PUF: Sybil detectado!")
+            ) : null
+          )
+        ),
+        el('button', {onClick:run, style:{width:'100%',padding:'9px',fontSize:13,fontWeight:500, background:puf?'#7c3aed':'#2563eb',borderColor:puf?'#7c3aed':'#2563eb',color:'white'}}, puf?'↩ Reset':'▶ Ativar PUF Attestation'),
+        el('p', {style:{fontSize:11,color:'#64748b',textAlign:'center',marginTop:6}}, !puf?'Sem PUF: todos os 5 aceitos pelo comportamento': phase==='done'?'Com PUF: 5/5 identidades rejeitadas':'')
+      ),
+      el('div', null,
+        el('h4', {style:{fontSize:13,fontWeight:500,marginBottom:10}}, `Comparação de assinaturas (${NB} bits)`),
+        !puf ? el('div', {className:"card", style:{textAlign:'center',padding:20}},
+          el('p', {style:{color:'#64748b',marginBottom:12,fontSize:12}}, "Sem PUF ativo — todos os 5 clientes aprovados pelo comportamento"),
+          el('div', {style:{display:'flex',gap:8,justifyContent:'center'}}, FAKE.map(id=>el('span', {key:id, className:"chip", style:{background:'#16a34a22',color:'#22c55e',border:'1px solid #16a34a44'}}, `C${id} ✓`)))
+        ) : null,
+        puf ? comps.map((c,idx)=>{
+          if(revealed<=idx) return el('div', {key:c.id, style:{height:70,border:'1px dashed #1e293b',borderRadius:8,marginBottom:8,display:'flex',alignItems:'center',justifyContent:'center',opacity:.4}},
+            el('span', {style:{fontSize:11,color:'#64748b'}}, `C${c.id} — aguardando...`)
+          );
+          const isSel=sel===c.id, blocked=c.sim<THR;
+          return el('div', {key:c.id, style:{marginBottom:8,padding:'9px 12px',borderRadius:8, border:`1px solid ${blocked?'#dc262644':'#16a34a44'}`, background:blocked?'#1a0a0a':'#0a1a0a',cursor:'pointer', outline:isSel?'2px solid #f59e0b':undefined}, onClick:()=>setSel(sel===c.id?null:c.id)},
+            el('div', {style:{display:'flex',alignItems:'center',gap:8,marginBottom:isSel?8:0}},
+              el('strong', {style:{fontSize:12}}, `Device C${c.id}`),
+              el('span', {style:{fontSize:11,color:'#64748b'}}, `Hamming: ${Math.round((1-c.sim)*100)}%`),
+              el('div', {style:{flex:1,height:5,background:'#1e293b',borderRadius:3,overflow:'hidden'}},
+                el('div', {style:{height:'100%',width:(c.sim*100)+'%',background:blocked?'#ef4444':'#22c55e'}})
+              ),
+              el('span', {style:{fontSize:11,fontWeight:600,color:blocked?'#ef4444':'#22c55e'}}, `${Math.round(c.sim*100)}%`),
+              el('span', {style:{fontSize:12,fontWeight:700,color:blocked?'#ef4444':'#22c55e'}}, blocked?'BLOQUEADO':'ACEITO')
+            ),
+            isSel ? el(React.Fragment, null,
+              el('p', {style:{fontSize:10,color:'#64748b',marginBottom:4}}, "Assinatura cadastrada (enrollment):"),
+              el('div', {style:{display:'flex',gap:1.5,marginBottom:6,flexWrap:'nowrap',overflow:'hidden'}}, c.enrolled.slice(0,32).map((b,i)=>el('span', {key:i, style:{width:11,height:11,borderRadius:1,display:'inline-block',background:b?'#1d4ed8':'#334155'}}))),
+              el('p', {style:{fontSize:10,color:'#f59e0b',marginBottom:4}}, "Resposta atual do Chip 99:"),
+              el('div', {style:{display:'flex',gap:1.5,marginBottom:4,flexWrap:'nowrap',overflow:'hidden'}}, sig99.slice(0,32).map((b,i)=>el('span', {key:i, style:{width:11,height:11,borderRadius:1,display:'inline-block',background:c.enrolled[i]===b?'#22c55e':'#ef4444'}}))),
+              el('div', {style:{fontSize:10,color:'#64748b'}},
+                el('span', {style:{background:'#22c55e22',padding:'1px 4px',borderRadius:2,marginRight:4}}, "■ match"),
+                el('span', {style:{background:'#ef444422',padding:'1px 4px',borderRadius:2}}, "■ mismatch")
+              )
+            ) : null
+          );
+        }) : null
+      )
+    )
   );
 }
 
-// ── Tab 4: Import Real Data ──────────────────────────────────────────────────
 function ImportTab({onData,realData}){
   const[json,setJson]=useState('');
   const[err,setErr]=useState('');
-
-  const parse=()=>{
-    try{const d=JSON.parse(json);onData(d);setErr('');}
-    catch(e){setErr('JSON inválido: '+e.message);}
-  };
+  const parse=()=>{try{const d=JSON.parse(json);onData(d);setErr('');}catch(e){setErr('JSON inválido: '+e.message);}};
   const clear=()=>{onData(null);setJson('');setErr('');};
 
-  return(
-    <div style={{maxWidth:700}}>
-      <h3 style={{fontSize:15,fontWeight:500,marginBottom:8}}>Importar Dados Reais do Experimento</h3>
-      <p style={{fontSize:12,color:'#64748b',marginBottom:16,lineHeight:1.6}}>
-        Execute <code style={{background:'#1e293b',padding:'1px 5px',borderRadius:3,fontSize:11}}>python fl_sentinel_puf.py</code> e cole o conteúdo
-        de <code style={{background:'#1e293b',padding:'1px 5px',borderRadius:3,fontSize:11}}>sentinel_puf_results.json</code> abaixo.
-        Os gráficos nas abas "Live" e "Dashboard" passarão a exibir os dados reais.
-      </p>
-      {realData&&(
-        <div style={{marginBottom:12,padding:10,background:'#0a1a0a',border:'1px solid #16a34a44',borderRadius:8,fontSize:12}}>
-          <strong style={{color:'#22c55e'}}>✓ Dados carregados: </strong>
-          <span style={{color:'#64748b'}}>{Object.keys(realData.scenarios||{}).join(', ')} — {realData.generated||''}</span>
-          <button onClick={clear} style={{marginLeft:12,fontSize:11}}>Remover</button>
-        </div>
-      )}
-      <textarea value={json} onChange={e=>setJson(e.target.value)} rows={14}
-        placeholder={'{\n  "generated": "...",\n  "scenarios": {\n    "baseline": { "accuracy": 86.6, "asr": 7.2, "history": [...] },\n    "attack": { ... },\n    "sentinel": { ... },\n    "puf": { ... }\n  }\n}'}/>
-      {err&&<p style={{color:'#ef4444',fontSize:12,marginTop:6}}>{err}</p>}
-      <div style={{display:'flex',gap:8,marginTop:10}}>
-        <button onClick={parse} className="primary" disabled={!json}>Carregar JSON</button>
-        <button onClick={()=>setJson('')}>Limpar</button>
-      </div>
-      <div style={{marginTop:20,padding:12,background:'#1e293b',borderRadius:8}}>
-        <p style={{fontSize:12,fontWeight:500,marginBottom:8}}>Adicione ao final de <code>fl_sentinel_puf.py</code>:</p>
-        <pre style={{fontSize:11,color:'#94a3b8',overflow:'auto',lineHeight:1.6}}>{`import json, datetime
+  return el('div', {style:{maxWidth:700}},
+    el('h3', {style:{fontSize:15,fontWeight:500,marginBottom:8}}, "Importar Dados Reais do Experimento"),
+    el('p', {style:{fontSize:12,color:'#64748b',marginBottom:16,lineHeight:1.6}}, "Execute ", el('code', {style:{background:'#1e293b',padding:'1px 5px',borderRadius:3,fontSize:11}}, "python fl_sentinel_puf.py"), " e cole o conteúdo de ", el('code', {style:{background:'#1e293b',padding:'1px 5px',borderRadius:3,fontSize:11}}, "sentinel_puf_results.json"), " abaixo. Os gráficos nas abas \"Live\" e \"Dashboard\" passarão a exibir os dados reais."),
+    realData ? el('div', {style:{marginBottom:12,padding:10,background:'#0a1a0a',border:'1px solid #16a34a44',borderRadius:8,fontSize:12}},
+      el('strong', {style:{color:'#22c55e'}}, "✓ Dados carregados: "),
+      el('span', {style:{color:'#64748b'}}, Object.keys(realData.scenarios||{}).join(', ') + ' — ' + (realData.generated||'')),
+      el('button', {onClick:clear, style:{marginLeft:12,fontSize:11}}, "Remover")
+    ) : null,
+    el('textarea', {value:json, onChange:ev=>setJson(ev.target.value), rows:14, placeholder:'{\n  "generated": "...",\n  "scenarios": {\n    "baseline": { "accuracy": 86.6, "asr": 7.2, "history": [...] },\n    "attack": { ... },\n    "sentinel": { ... },\n    "puf": { ... }\n  }\n}'}),
+    err ? el('p', {style:{color:'#ef4444',fontSize:12,marginTop:6}}, err) : null,
+    el('div', {style:{display:'flex',gap:8,marginTop:10}},
+      el('button', {onClick:parse, className:"primary", disabled:!json}, "Carregar JSON"),
+      el('button', {onClick:()=>setJson('')}, "Limpar")
+    ),
+    el('div', {style:{marginTop:20,padding:12,background:'#1e293b',borderRadius:8}},
+      el('p', {style:{fontSize:12,fontWeight:500,marginBottom:8}}, "Adicione ao final de ", el('code', null, "fl_sentinel_puf.py"), ":"),
+      el('pre', {style:{fontSize:11,color:'#94a3b8',overflow:'auto',lineHeight:1.6}}, `import json, datetime
 results = {
     "generated": datetime.datetime.now().isoformat(),
     "config": {"num_clients": NUM_CLIENTS, "rounds": COMMUNICATION_ROUNDS},
@@ -590,34 +509,30 @@ if acc_puf:
         "history": [{"round":i+1,"asr":v} for i,v in enumerate(history_puf_asr)]}
 with open("sentinel_puf_results.json","w") as f:
     json.dump(results,f,indent=2)
-print("Exportado: sentinel_puf_results.json")`}</pre>
-      </div>
-    </div>
+print("Exportado: sentinel_puf_results.json")`)
+    )
   );
 }
 
-// ── Root App ─────────────────────────────────────────────────────────────────
 function App(){
   const[tab,setTab]=useState('live');
   const[realData,setRealData]=useState(null);
   const tabs=[{id:'live',label:'▶ Live Simulation'},{id:'dashboard',label:'📊 Dashboard'},{id:'sybil',label:'🔐 Sybil Attack'},{id:'import',label:'⬆ Importar Dados'}];
-  return(
-    <div id="root">
-      <header>
-        <h1>Sentinel-Flow + Analog PUF</h1>
-        <p>Federated NIDS with behavioral and hardware attestation — Zago et al. 2025 + PUF extension</p>
-      </header>
-      <nav className="tabs">
-        {tabs.map(t=><button key={t.id} className={`tab${tab===t.id?' active':''}`} onClick={()=>setTab(t.id)}>{t.label}</button>)}
-      </nav>
-      <div className={`panel${tab==='live'?' active':''}`}><LiveSim realData={realData}/></div>
-      <div className={`panel${tab==='dashboard'?' active':''}`}><Dashboard realData={realData}/></div>
-      <div className={`panel${tab==='sybil'?' active':''}`}><SybilTab/></div>
-      <div className={`panel${tab==='import'?' active':''}`}><ImportTab onData={setRealData} realData={realData}/></div>
-    </div>
+  return el('div', {id:"root"},
+    el('header', null,
+      el('h1', null, "Sentinel-Flow + Analog PUF"),
+      el('p', null, "Federated NIDS with behavioral and hardware attestation — Zago et al. 2025 + PUF extension")
+    ),
+    el('nav', {className:"tabs"},
+      tabs.map(t=> el('button', {key:t.id, className:`tab${tab===t.id?' active':''}`, onClick:()=>setTab(t.id)}, t.label))
+    ),
+    el('div', {className:`panel${tab==='live'?' active':''}`}, el(LiveSim, {realData:realData})),
+    el('div', {className:`panel${tab==='dashboard'?' active':''}`}, el(Dashboard, {realData:realData})),
+    el('div', {className:`panel${tab==='sybil'?' active':''}`}, el(SybilTab, null)),
+    el('div', {className:`panel${tab==='import'?' active':''}`}, el(ImportTab, {onData:setRealData, realData:realData}))
   );
 }
-ReactDOM.render(<App/>,document.getElementById('root'));
+ReactDOM.render(el(App, null), document.getElementById('root'));
 </script>
 </body>
 </html>
