@@ -6,6 +6,7 @@
 <title>Sentinel-Flow + Analog PUF — Thesis Visualization</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prop-types/15.8.1/prop-types.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/recharts/2.8.0/Recharts.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
@@ -15,26 +16,22 @@ header{padding:18px 28px;border-bottom:1px solid #1e293b;background:#0f172a;}
 header h1{font-size:18px;font-weight:600;color:#f1f5f9;letter-spacing:-.3px;}
 header p{font-size:12px;color:#64748b;margin-top:3px;}
 .tabs{display:flex;gap:0;border-bottom:1px solid #1e293b;background:#0f172a;padding:0 24px;}
-.tab{padding:10px 20px;font-size:13px;font-weight:500;background:transparent;border:none;
- color:#64748b;cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;}
+.tab{padding:10px 20px;font-size:13px;font-weight:500;background:transparent;border:none; color:#64748b;cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;}
 .tab:hover{color:#94a3b8;}
 .tab.active{color:#3b82f6;border-bottom-color:#3b82f6;}
 .panel{display:none;flex:1;padding:20px 28px;overflow-y:auto;}
 .panel.active{display:block;}
-button{background:#1e293b;color:#f1f5f9;border:1px solid #334155;border-radius:6px;
- padding:6px 12px;font-size:12px;cursor:pointer;transition:all .15s;}
+button{background:#1e293b;color:#f1f5f9;border:1px solid #334155;border-radius:6px; padding:6px 12px;font-size:12px;cursor:pointer;transition:all .15s;}
 button:hover{background:#334155;}
 button.primary{background:#2563eb;border-color:#2563eb;color:white;}
 button.primary:hover{background:#1d4ed8;}
 button.danger{background:#dc2626;border-color:#dc2626;color:white;}
-select{background:#1e293b;color:#f1f5f9;border:1px solid #334155;border-radius:6px;
- padding:5px 8px;font-size:12px;cursor:pointer;}
+select{background:#1e293b;color:#f1f5f9;border:1px solid #334155;border-radius:6px; padding:5px 8px;font-size:12px;cursor:pointer;}
 .card{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:14px;}
 .chip{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:4px;font-size:11px;font-weight:500;}
 .metric{font-size:24px;font-weight:600;}
 input[type=range]{accent-color:#3b82f6;}
-textarea{background:#0f172a;color:#f1f5f9;border:1px solid #334155;border-radius:6px;
- padding:10px;font-size:12px;font-family:monospace;width:100%;resize:vertical;}
+textarea{background:#0f172a;color:#f1f5f9;border:1px solid #334155;border-radius:6px; padding:10px;font-size:12px;font-family:monospace;width:100%;resize:vertical;}
 </style>
 </head>
 <body>
@@ -73,14 +70,17 @@ function simTick(r,sc,nodes){
   const ratio=cl.length?cl.filter(n=>n.isPoisoned).length/cl.length:0;
   const rng=(s=2)=>(Math.random()-.5)*s, def=sc==='sentinel'||sc==='puf';
   let asr,acc;
-  if(sc==='baseline'){asr=Math.max(0,7+5*Math.exp(-t*6)+rng(1.5));acc=Math.min(100,79+9*(1-Math.exp(-t*5))+rng(.4));}
-  else if(sc==='attack'){asr=Math.min(100,100*(1-Math.exp(-t*12*ratio*2))+rng(1.2));acc=Math.max(40,86-36*(1-Math.exp(-t*10*ratio))+rng(.5));}
-  else{asr=Math.max(0,6.5+4*Math.exp(-t*5)+rng(sc==='puf'?.9:1.1));acc=Math.min(100,80+15*(1-Math.exp(-t*4))+rng(.35));}
+  
+  if(sc==='baseline'){ asr=Math.max(0,7+5*Math.exp(-t*6)+rng(1.5)); acc=Math.min(100,79+9*(1-Math.exp(-t*5))+rng(0.4)); }
+  else if(sc==='attack'){ asr=Math.min(100,100*(1-Math.exp(-t*12*ratio*2))+rng(1.2)); acc=Math.max(40,86-36*(1-Math.exp(-t*10*ratio))+rng(0.5)); }
+  else{ asr=Math.max(0,6.5+4*Math.exp(-t*5)+rng(sc==='puf' ? 0.9 : 1.1)); acc=Math.min(100,80+15*(1-Math.exp(-t*4))+rng(0.35)); }
+  
   const updated=nodes.map(n=>{
     if(n.clientId===undefined)return n;
-    const trust=n.isPoisoned?.1+Math.random()*.35:.78+Math.random()*.22;
+    const trust = n.isPoisoned ? 0.1 + Math.random() * 0.35 : 0.78 + Math.random() * 0.22;
     return{...n,trust,blocked:def&&n.isPoisoned&&trust<.6};
   });
+  
   return{nodes:updated,asr:+asr.toFixed(1),acc:+acc.toFixed(1),
     approved:updated.filter(n=>n.clientId!==undefined&&!n.blocked).length,
     blockedBeh:updated.filter(n=>n.blocked).length};
@@ -92,7 +92,7 @@ function NetworkSVG({nodes,parts,sc,round,stats,svgRef,onDrag}){
   return el('svg', {ref:svgRef, viewBox:`0 0 ${NW} ${NH}`, width:"100%", style:{display:'block',userSelect:'none'}},
     clients.map(n=> el('g', {key:`e${n.id}`},
       el('line', {x1:SDN.x, y1:SDN.y, x2:n.pos.x, y2:n.pos.y, stroke:n.blocked?'#dc262640':'#33415566', strokeWidth:n.blocked?1.2:.6, strokeDasharray:n.blocked?'3,3':undefined}),
-      el('line', {x1:n.pos.x, y1:n.pos.y, x2:AGG.x, y2:AGG.y, stroke:"#33415544", strokeWidth:.5, opacity:n.blocked?.2:.5})
+      el('line', {x1:n.pos.x, y1:n.pos.y, x2:AGG.x, y2:AGG.y, stroke:"#33415544", strokeWidth:.5, opacity: n.blocked ? 0.2 : 0.5})
     )),
     parts.map(p=>{
       const f=gpos(p.from), t=gpos(p.to); if(!f||!t)return null;
@@ -100,7 +100,7 @@ function NetworkSVG({nodes,parts,sc,round,stats,svgRef,onDrag}){
       return el('circle', {key:p.id, cx:pp.x, cy:pp.y, r:p.type==='weights'?2.2:3, fill:PC[p.type], opacity:.88});
     }),
     clients.map(n=>{
-      const c=ncol(n,sc), R=13, alpha=n.blocked?.4:(n.trust!=null?.4+n.trust*.6:1);
+      const c=ncol(n,sc), R=13, alpha = n.blocked ? 0.4 : (n.trust != null ? 0.4 + n.trust * 0.6 : 1);
       return el('g', {key:n.id, onMouseDown:ev=>onDrag(n.id,ev), style:{cursor:'move'}},
         !n.blocked ? el('circle', {cx:n.pos.x, cy:n.pos.y, r:R+5, fill:"none", stroke:c, strokeWidth:1.5, opacity:.18}) : null,
         sc==='puf' && !n.blocked ? el('circle', {cx:n.pos.x, cy:n.pos.y, r:R+9, fill:"none", stroke:"#2563eb", strokeWidth:1, opacity:.13, strokeDasharray:"2,4"}) : null,
@@ -490,8 +490,7 @@ function ImportTab({onData,realData}){
     ),
     el('div', {style:{marginTop:20,padding:12,background:'#1e293b',borderRadius:8}},
       el('p', {style:{fontSize:12,fontWeight:500,marginBottom:8}}, "Adicione ao final de ", el('code', null, "fl_sentinel_puf.py"), ":"),
-      el('pre', {style:{fontSize:11,color:'#94a3b8',overflow:'auto',lineHeight:1.6}}, `import json, datetime
-results = {
+      el('pre', {style:{fontSize:11,color:'#94a3b8',overflow:'auto',lineHeight:1.6}}, `import json, datetimeresults = {
     "generated": datetime.datetime.now().isoformat(),
     "config": {"num_clients": NUM_CLIENTS, "rounds": COMMUNICATION_ROUNDS},
     "scenarios": {
@@ -532,7 +531,9 @@ function App(){
     el('div', {className:`panel${tab==='import'?' active':''}`}, el(ImportTab, {onData:setRealData, realData:realData}))
   );
 }
-ReactDOM.render(el(App, null), document.getElementById('root'));
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(el(App, null));
 </script>
 </body>
 </html>
