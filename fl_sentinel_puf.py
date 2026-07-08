@@ -5,19 +5,15 @@ Experimento completo: Sentinel-Flow com atestação por Analog PUF.
 
 Cenários:
     1. FedAvg Honesto       — baseline sem ataque e sem defesa
-    2. Weight Scaling Attack — clean-label poisoning + escalonamento
+    2. Weight Scaling Attack — clean-label poisoning + escalonamento agressivo (4x)
     3. Sentinel-Flow         — atestação comportamental via canary flows
-    4. Sentinel-Flow + PUF  — comportamental + autenticação de hardware analógico
-
-Bônus: diagnóstico de Sybil attack (1 chip físico → N identidades falsas)
+    4. Sentinel-Flow + PUF   — comportamental + autenticação de hardware analógico
+    5. Smart Sybil           — Ataque avançado fraudando o software para demonstrar
+                               que a ancoragem física (PUF) é a defesa definitiva.
 
 Uso:
     conda activate aihwkit_puf
     python fl_sentinel_puf.py
-
-Requisitos:
-    pip install torch pandas scikit-learn matplotlib
-    (aihwkit-puf deve estar em ~/aihwkit-puf ou ajuste PUF_ROOT abaixo)
 """
 
 import os
@@ -45,8 +41,7 @@ try:
 except ImportError as e:
     PUF_AVAILABLE = False
     print(f"[PUF] AVISO: módulo não encontrado ({e})")
-    print("[PUF] Cenários 4 e Bônus serão desabilitados.")
-    print("[PUF] Certifique-se de que ~/aihwkit-puf está instalado.")
+    print("[PUF] Cenários envolvendo hardware serão desabilitados.")
 
 # =============================================================================
 # 1. PREPARAÇÃO DOS DADOS
@@ -58,6 +53,7 @@ print("\n" + "="*60)
 print("CARREGANDO DATASET...")
 print("="*60)
 
+# Carrega o dataset CIC-IDS2017 processado
 data = pd.read_csv('dataset.txt', header=None)
 y = (data.iloc[:, -2] != 'normal').astype(int).values
 X = pd.get_dummies(data.iloc[:, :-2]).astype(float)
@@ -78,29 +74,27 @@ attack_idx = (y_test == 1).nonzero(as_tuple=True)[0]
 canary_X   = X_test[attack_idx[:100]]
 canary_y   = y_test[attack_idx[:100]]
 
-print("Dataset carregado.")
 print(f"  Treino   : {X_train.shape}")
 print(f"  Teste    : {X_test.shape}")
 print(f"  Features : {INPUT_DIM}")
-print(f"  Ataques no teste: {(y_test == 1).sum().item()}")
-print(f"  Canary set: {len(canary_X)} amostras")
 
 # =============================================================================
-# 2. CONFIGURAÇÕES DO EXPERIMENTO (parâmetros do artigo)
+# 2. CONFIGURAÇÕES DO EXPERIMENTO
 # =============================================================================
 NUM_CLIENTS          = 20
 COMMUNICATION_ROUNDS = 200
 LOCAL_EPOCHS         = 3
-POISONED_CLIENTS     = [15, 16, 17, 18, 19]  # 5 atacantes
+POISONED_CLIENTS     = [15, 16, 17, 18, 19]  # 5 atacantes originais
 TRUST_THRESHOLD      = 0.60
 PUF_THRESHOLD        = 0.90
 PUF_CHALLENGES       = 256
 
-# Prepara rótulos envenenados (clean-label: troca ataques por 0)
+# Partição Não-IID dos dados
 client_data_size = len(X_train) // NUM_CLIENTS
 client_X = [X_train[i*client_data_size:(i+1)*client_data_size] for i in range(NUM_CLIENTS)]
 client_y = [y_train[i*client_data_size:(i+1)*client_data_size] for i in range(NUM_CLIENTS)]
 
+# Rótulos envenenados padrão (Clean-label poisoning para 5 atacantes)
 client_y_poisoned = copy.deepcopy(client_y)
 for pc in POISONED_CLIENTS:
     lbl = client_y_poisoned[pc].clone()
@@ -108,21 +102,15 @@ for pc in POISONED_CLIENTS:
     client_y_poisoned[pc] = lbl
 
 # =============================================================================
-# 3. UTILITÁRIOS
+# 3. UTILITÁRIOS DE APRENDIZADO
 # =============================================================================
-
 def create_model():
-    """Arquitetura NIDS do artigo: Linear(N,64) -> ReLU -> Linear(64,1) -> Sigmoid."""
     return nn.Sequential(
-        nn.Linear(INPUT_DIM, 64),
-        nn.ReLU(),
-        nn.Linear(64, 1),
-        nn.Sigmoid()
+        nn.Linear(INPUT_DIM, 64), nn.ReLU(),
+        nn.Linear(64, 1), nn.Sigmoid()
     )
 
-
 def evaluate(model, verbose=False):
-    """Retorna (accuracy%, ASR%)."""
     model.eval()
     with torch.no_grad():
         preds = (model(X_test) > 0.5).float()
@@ -133,26 +121,20 @@ def evaluate(model, verbose=False):
         print(f"    Acuracia: {acc:.2f}%  ASR: {asr:.2f}%")
     return acc, asr
 
-
 def fedavg(global_model, local_weights_list):
-    """FedAvg padrão — média simples dos pesos locais."""
     gw = copy.deepcopy(global_model.state_dict())
     for key in gw.keys():
         gw[key] = torch.stack([w[key] for w in local_weights_list], dim=0).mean(dim=0)
     global_model.load_state_dict(gw)
 
-
 def apply_weight_scaling(local_model, global_model, scale_factor):
-    """Weight scaling attack: amplifica gradientes para dominar FedAvg."""
     sd_local  = local_model.state_dict()
     sd_global = global_model.state_dict()
     for key in sd_local.keys():
         diff = sd_local[key] - sd_global[key]
         sd_local[key].copy_(sd_global[key] + scale_factor * diff)
 
-
 def train_local(local_model, X, y, epochs=LOCAL_EPOCHS, lr=0.005):
-    """Treinamento local padrão."""
     opt  = optim.Adam(local_model.parameters(), lr=lr)
     loss_fn = nn.BCELoss()
     for _ in range(epochs):
@@ -160,399 +142,256 @@ def train_local(local_model, X, y, epochs=LOCAL_EPOCHS, lr=0.005):
         loss_fn(local_model(X), y).backward()
         opt.step()
 
-
 def compute_trust_score(local_model, canary_X, canary_y):
-    """Trust Score comportamental — Eq. 2 do Sentinel-Flow."""
     local_model.eval()
     with torch.no_grad():
         preds = (local_model(canary_X) > 0.5).float()
         return (preds == canary_y).float().mean().item()
 
-
 # =============================================================================
-# 4. PUF: HARDWARE DE AUTENTICAÇÃO ANALÓGICO
+# 4. PUF: HARDWARE DE AUTENTICAÇÃO
 # =============================================================================
-
 class ClientHardware:
-    """
-    Representa o chip analógico PCM de um cliente FL.
-
-    Contém apenas os atributos necessários para PUFEnrollment.extract_signature():
-        .device_identity  -> DeviceIdentity (parâmetros físicos únicos)
-        .noise_model      -> PCMLikeNoiseModel configurado com a identidade
-
-    O chip é INDEPENDENTE do modelo NIDS. O PUF atesta o HARDWARE
-    que hospeda o modelo, não os pesos do modelo em si.
-
-    Analogia: é o wobble do PS1 — uma propriedade física irreproduzível
-    do suporte físico, não do conteúdo armazenado nele.
-    """
     def __init__(self, device_id: int):
         self.device_identity = DeviceIdentity(device_id, "pcm")
         self.noise_model     = self.device_identity.to_noise_model()
 
-    def __repr__(self):
-        d = self.device_identity
-        return f"ClientHardware(id={d.device_id}, g_prog_offset={float(d.g_prog_offset):.4f} uS)"
-
-
 def puf_enroll(hardware_list, enrollment):
-    """
-    Fase de enrollment: extrai e armazena assinaturas PUF de todos os clientes.
-    Executada UMA vez, antes do treinamento federado começar.
-
-    Returns:
-        dict {device_id: enrolled_signature (np.ndarray bool)}
-    """
     db = {}
     for hw in hardware_list:
-        did = hw.device_identity.device_id
-        db[did] = enrollment.extract_signature(hw)
+        db[hw.device_identity.device_id] = enrollment.extract_signature(hw)
     return db
 
-
 def puf_verify(hw, enrollment, enrolled_db, threshold=PUF_THRESHOLD):
-    """
-    Verifica a identidade do hardware de um cliente via PUF.
-
-    Returns:
-        (passed: bool, similarity: float)
-    """
-    did     = hw.device_identity.device_id
+    did = hw.device_identity.device_id
     if did not in enrolled_db:
         return False, 0.0
-    current  = enrollment.extract_signature(hw)
-    enrolled = enrolled_db[did]
-    hamming  = float(np.mean(current != enrolled))
-    sim      = 1.0 - hamming
+    sim = 1.0 - float(np.mean(enrollment.extract_signature(hw) != enrolled_db[did]))
     return sim >= threshold, round(sim, 4)
 
-
 # =============================================================================
-# 5. CENÁRIO 1 — FEDAVG HONESTO (BASELINE)
+# EXECUÇÃO DOS CENÁRIOS
 # =============================================================================
-print("\n" + "="*60)
-print("CENÁRIO 1: FedAvg Honesto (Baseline)")
-print("="*60)
 
-model_base  = create_model()
+# ---------------------------------------------------------
+# 1. BASELINE HONESTO
+# ---------------------------------------------------------
+print("\n" + "="*60 + "\nCENÁRIO 1: FedAvg Honesto (Baseline)\n" + "="*60)
+model_base = create_model()
 history_base_asr = []
-
 for r in range(COMMUNICATION_ROUNDS):
-    local_weights = []
+    lw = []
     for i in range(NUM_CLIENTS):
         lm = create_model()
-        lm.load_state_dict(copy.deepcopy(model_base.state_dict()))
+        lm.load_state_dict(model_base.state_dict())
         train_local(lm, client_X[i], client_y[i])
-        local_weights.append(copy.deepcopy(lm.state_dict()))
-    fedavg(model_base, local_weights)
+        lw.append(lm.state_dict())
+    fedavg(model_base, lw)
     _, asr = evaluate(model_base)
     history_base_asr.append(asr)
     if (r + 1) % 50 == 0:
         print(f"  Rodada {r+1}/{COMMUNICATION_ROUNDS}", end=" | ")
         evaluate(model_base, verbose=True)
-
 acc_base, asr_base = evaluate(model_base)
-print(f"RESULTADO BASELINE -> Acuracia: {acc_base:.2f}%  ASR: {asr_base:.2f}%")
 
-# =============================================================================
-# 6. CENÁRIO 2 — WEIGHT SCALING ATTACK
-# =============================================================================
-print("\n" + "="*60)
-print("CENÁRIO 2: Weight Scaling Attack (sem defesa)")
-print("="*60)
 
-model_atk       = create_model()
+# ---------------------------------------------------------
+# 2. ATAQUE DE ESCALONAMENTO AGRESSIVO
+# ---------------------------------------------------------
+print("\n" + "="*60 + "\nCENÁRIO 2: Weight Scaling Attack (4.0x)\n" + "="*60)
+model_atk = create_model()
 history_atk_asr = []
-scale_factor    = NUM_CLIENTS / len(POISONED_CLIENTS)
-
+sf_atk = NUM_CLIENTS / len(POISONED_CLIENTS) # Multiplicador ~4.0
 for r in range(COMMUNICATION_ROUNDS):
-    local_weights = []
+    lw = []
     for i in range(NUM_CLIENTS):
         lm = create_model()
-        lm.load_state_dict(copy.deepcopy(model_atk.state_dict()))
+        lm.load_state_dict(model_atk.state_dict())
         train_local(lm, client_X[i], client_y_poisoned[i])
         if i in POISONED_CLIENTS:
-            apply_weight_scaling(lm, model_atk, scale_factor)
-        local_weights.append(copy.deepcopy(lm.state_dict()))
-    fedavg(model_atk, local_weights)
+            apply_weight_scaling(lm, model_atk, sf_atk)
+        lw.append(lm.state_dict())
+    fedavg(model_atk, lw)
     _, asr = evaluate(model_atk)
     history_atk_asr.append(asr)
     if (r + 1) % 50 == 0:
         print(f"  Rodada {r+1}/{COMMUNICATION_ROUNDS}", end=" | ")
         evaluate(model_atk, verbose=True)
-
 acc_atk, asr_atk = evaluate(model_atk)
-print(f"RESULTADO ATAQUE -> Acuracia: {acc_atk:.2f}%  ASR: {asr_atk:.2f}%")
 
-# =============================================================================
-# 7. CENÁRIO 3 — SENTINEL-FLOW (COMPORTAMENTAL)
-# =============================================================================
-print("\n" + "="*60)
-print("CENÁRIO 3: Sentinel-Flow — Atestação Comportamental")
-print("="*60)
 
-model_sf       = create_model()
+# ---------------------------------------------------------
+# 3. SENTINEL-FLOW (COMPORTAMENTAL)
+# ---------------------------------------------------------
+print("\n" + "="*60 + "\nCENÁRIO 3: Sentinel-Flow (Comportamental)\n" + "="*60)
+model_sf = create_model()
 history_sf_asr = []
-
 for r in range(COMMUNICATION_ROUNDS):
-    accepted_weights = []
-    n_blocked = 0
-
+    lw = []
     for i in range(NUM_CLIENTS):
         lm = create_model()
-        lm.load_state_dict(copy.deepcopy(model_sf.state_dict()))
+        lm.load_state_dict(model_sf.state_dict())
         train_local(lm, client_X[i], client_y_poisoned[i])
         if i in POISONED_CLIENTS:
-            apply_weight_scaling(lm, model_sf, scale_factor)
-
-        # ── Atestação comportamental (canary flows) ────────────
-        trust = compute_trust_score(lm, canary_X, canary_y)
-        if trust >= TRUST_THRESHOLD:
-            accepted_weights.append(copy.deepcopy(lm.state_dict()))
-        else:
-            n_blocked += 1
-
-    if accepted_weights:
-        fedavg(model_sf, accepted_weights)
-
+            apply_weight_scaling(lm, model_sf, sf_atk)
+        if compute_trust_score(lm, canary_X, canary_y) >= TRUST_THRESHOLD:
+            lw.append(lm.state_dict())
+    if lw: fedavg(model_sf, lw)
     _, asr = evaluate(model_sf)
     history_sf_asr.append(asr)
     if (r + 1) % 50 == 0:
-        print(f"  Rodada {r+1} | Aceitos: {len(accepted_weights)} | Bloqueados: {n_blocked}", end=" | ")
+        print(f"  Rodada {r+1}/{COMMUNICATION_ROUNDS}", end=" | ")
         evaluate(model_sf, verbose=True)
-
 acc_sf, asr_sf = evaluate(model_sf)
-print(f"RESULTADO SENTINEL-FLOW -> Acuracia: {acc_sf:.2f}%  ASR: {asr_sf:.2f}%")
 
-# =============================================================================
-# 8. CENÁRIO 4 — SENTINEL-FLOW + PUF (se módulo disponível)
-# =============================================================================
+
+# Preparação para cenários com PUF e Smart Sybil
 history_puf_asr = []
-acc_puf = asr_puf = None
+history_smsf_asr = []
+history_smpuf_asr = []
+acc_puf = asr_puf = acc_smsf = asr_smsf = acc_smpuf = asr_smpuf = None
 
 if PUF_AVAILABLE:
-    print("\n" + "="*60)
-    print("CENÁRIO 4: Sentinel-Flow + Analog PUF")
-    print("="*60)
-
-    # ── Cria hardware analógico para cada cliente ──────────────────────────────
-    # Cada cliente tem um chip PCM único com device_id = índice do cliente
-    client_hardware = [ClientHardware(device_id=i) for i in range(NUM_CLIENTS)]
-
-    print(f"Hardware analógico criado para {NUM_CLIENTS} clientes:")
-    for hw in client_hardware[:3]:
-        print(f"  {hw}")
-    print("  ...")
-
-    # ── Enrollment PUF: executado UMA vez, antes do FL ────────────────────────
-    print("\nFase de enrollment PUF...")
+    print("\nInicializando infraestrutura de hardware (PUF)...")
+    client_hardware = [ClientHardware(i) for i in range(NUM_CLIENTS)]
     enrollment = PUFEnrollment(n_challenges=PUF_CHALLENGES)
     enrolled_db = puf_enroll(client_hardware, enrollment)
-    print(f"Enrollment concluído: {len(enrolled_db)} chips cadastrados.")
 
-    # ── Treinamento FL com dupla atestação ────────────────────────────────────
-    model_puf      = create_model()
-    history_puf_asr = []
-
+    # ---------------------------------------------------------
+    # 4. SENTINEL-FLOW + PUF
+    # ---------------------------------------------------------
+    print("\n" + "="*60 + "\nCENÁRIO 4: Sentinel-Flow + PUF (Analógico)\n" + "="*60)
+    model_puf = create_model()
     for r in range(COMMUNICATION_ROUNDS):
-        accepted_weights = []
-        n_blocked_puf  = 0
-        n_blocked_beh  = 0
-
-        # Rotaciona os challenges PUF a cada rodada
-        # Isso impede two-faced attacks: o adversário não sabe
-        # quais condutâncias serão testadas nesta rodada
+        lw = []
         enrollment.rotate(r + 1)
-
         for i in range(NUM_CLIENTS):
-            hw = client_hardware[i]
             lm = create_model()
-            lm.load_state_dict(copy.deepcopy(model_puf.state_dict()))
+            lm.load_state_dict(model_puf.state_dict())
             train_local(lm, client_X[i], client_y_poisoned[i])
             if i in POISONED_CLIENTS:
-                apply_weight_scaling(lm, model_puf, scale_factor)
-
-            # ── Fase 1: Atestação PUF (hardware) ──────────────
-            # O controlador SDN envia challenge ao chip analógico.
-            # Verifica se a assinatura bate com o enrollment.
-            puf_ok, puf_sim = puf_verify(hw, enrollment, enrolled_db)
-
-            if not puf_ok:
-                # Chip não reconhecido: pode ser Sybil, substituição
-                # de hardware ou falha de dispositivo
-                n_blocked_puf += 1
-                continue
-
-            # ── Fase 2: Atestação comportamental (canary flows) ──
-            # Apenas clientes com hardware verificado passam para
-            # a etapa comportamental
-            trust = compute_trust_score(lm, canary_X, canary_y)
-
-            if trust >= TRUST_THRESHOLD:
-                accepted_weights.append(copy.deepcopy(lm.state_dict()))
-            else:
-                n_blocked_beh += 1
-
-        if accepted_weights:
-            fedavg(model_puf, accepted_weights)
-
+                apply_weight_scaling(lm, model_puf, sf_atk)
+            
+            puf_ok, _ = puf_verify(client_hardware[i], enrollment, enrolled_db)
+            if puf_ok and compute_trust_score(lm, canary_X, canary_y) >= TRUST_THRESHOLD:
+                lw.append(lm.state_dict())
+        if lw: fedavg(model_puf, lw)
         _, asr = evaluate(model_puf)
         history_puf_asr.append(asr)
-
         if (r + 1) % 50 == 0:
-            print(f"  Rodada {r+1} | Aceitos: {len(accepted_weights)} | Bloq. PUF: {n_blocked_puf} | Bloq. Beh: {n_blocked_beh}", end=" | ")
+            print(f"  Rodada {r+1}/{COMMUNICATION_ROUNDS}", end=" | ")
             evaluate(model_puf, verbose=True)
-
     acc_puf, asr_puf = evaluate(model_puf)
-    print(f"RESULTADO SF+PUF -> Acuracia: {acc_puf:.2f}%  ASR: {asr_puf:.2f}%")
 
     # =========================================================================
-    # 9. DIAGNÓSTICO: SYBIL ATTACK
-    # Demonstra que PUF detecta 1 atacante fingindo ser múltiplos clientes
+    # CENÁRIO 5: SMART SYBIL (BYPASS DE SOFTWARE + SINERGIA PUF)
+    # O atacante usa 10 clones virtuais e frauda o teste comportamental,
+    # forçando Trust = 1.0. O Sentinel-Flow será enganado. O PUF salvará a rede.
     # =========================================================================
-    print("\n" + "="*60)
-    print("DIAGNÓSTICO: Sybil Attack com Analog PUF")
-    print("="*60)
-    print("Cenário: 1 adversário físico tenta controlar os 5 slots de atacantes")
-    print("Mesmo chip (device_id=99) apresentado para 5 identidades diferentes\n")
+    SMART_POISONED = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19] # 10 atacantes
+    physical_attacker_id = 15 # O único chip real que o hacker possui
+    
+    # Preparar rótulos envenenados para todos os 10 atacantes do Cenário 5
+    client_y_smart = copy.deepcopy(client_y)
+    for pc in SMART_POISONED:
+        lbl = client_y_smart[pc].clone()
+        lbl[lbl == 1] = 0
+        client_y_smart[pc] = lbl
 
-    sybil_hw  = ClientHardware(device_id=99)  # 1 chip real do adversário
-    enrollment.rotate(0)  # usa o mesmo challenge do enrollment original
+    # 5A. Smart Sybil vs Apenas Sentinel-Flow (Sem PUF)
+    print("\n" + "="*60 + "\nCENÁRIO 5A: Smart Sybil (Bypass no Sentinel-Flow)\n" + "="*60)
+    model_smsf = create_model()
+    
+    for r in range(COMMUNICATION_ROUNDS):
+        lw = []
+        for i in range(NUM_CLIENTS):
+            lm = create_model()
+            lm.load_state_dict(model_smsf.state_dict())
+            train_local(lm, client_X[i], client_y_smart[i])
+            
+            if i in SMART_POISONED:
+                apply_weight_scaling(lm, model_smsf, sf_atk) # Veneno agressivo (4x)
+                trust = 1.0 # HACK: Atacante frauda os canários perfeitamente!
+            else:
+                trust = compute_trust_score(lm, canary_X, canary_y)
 
-    # Re-enrola com os challenges originais (round_seed=0)
-    enrollment_orig = PUFEnrollment(n_challenges=PUF_CHALLENGES, round_seed=0)
-    enrolled_orig   = puf_enroll(client_hardware, enrollment_orig)
+            if trust >= TRUST_THRESHOLD:
+                lw.append(lm.state_dict())
+                
+        if lw: fedavg(model_smsf, lw)
+        _, asr = evaluate(model_smsf)
+        history_smsf_asr.append(asr)
+        if (r + 1) % 50 == 0:
+            print(f"  Rodada {r+1}/{COMMUNICATION_ROUNDS}", end=" | ")
+            evaluate(model_smsf, verbose=True)
+            
+    acc_smsf, asr_smsf = evaluate(model_smsf)
 
-    sybil_results = []
-    for fake_id in POISONED_CLIENTS:
-        # Sybil apresenta o MESMO chip, mas tenta ser reconhecido como
-        # um dos 5 clientes comprometidos
-        puf_ok, sim = puf_verify(sybil_hw, enrollment_orig, enrolled_orig)
-        enrolled_sig = enrolled_orig[fake_id]
-        current_sig  = enrollment_orig.extract_signature(sybil_hw)
-        actual_sim   = round(1.0 - float(np.mean(current_sig != enrolled_sig)), 3)
-        status = "PASSOU" if actual_sim >= PUF_THRESHOLD else "BLOQUEADO"
-        sybil_results.append((fake_id, actual_sim, status))
-        print(f"  Chip 99 tentando ser Device {fake_id}: sim={actual_sim:.3f}  [{status}]")
-
-    n_detected = sum(1 for _, _, s in sybil_results if s == "BLOQUEADO")
-    print(f"\nSybil detectado: {n_detected}/{len(POISONED_CLIENTS)} tentativas bloqueadas pelo PUF.")
-    if n_detected == len(POISONED_CLIENTS):
-        print("Resultado: TODOS bloqueados — ataque Sybil completamente neutralizado.")
-
-# =============================================================================
-# 10. TABELA COMPARATIVA
-# =============================================================================
-print("\n" + "="*60)
-print("COMPARATIVO FINAL DE TODOS OS CENÁRIOS")
-print("="*60)
-print("{:<30} {:>12} {:>10}".format("Cenário", "Acurácia", "ASR"))
-print("-"*54)
-print("{:<30} {:>11.2f}% {:>9.2f}%".format("1. FedAvg Honesto", acc_base, asr_base))
-print("{:<30} {:>11.2f}% {:>9.2f}%".format("2. Weight Scaling Attack", acc_atk, asr_atk))
-print("{:<30} {:>11.2f}% {:>9.2f}%".format("3. Sentinel-Flow", acc_sf, asr_sf))
-if acc_puf is not None:
-    print("{:<30} {:>11.2f}% {:>9.2f}%".format("4. Sentinel-Flow + PUF", acc_puf, asr_puf))
-print("="*60)
-
-# =============================================================================
-# 11. GRÁFICO
-# =============================================================================
-print("\nGerando gráfico...")
-
-n_scenarios = 3 + (1 if history_puf_asr else 0)
-rounds = list(range(1, COMMUNICATION_ROUNDS + 1))
-
-fig, axes = plt.subplots(1, n_scenarios, figsize=(5 * n_scenarios, 5), sharey=True)
-if n_scenarios == 1:
-    axes = [axes]
-
-configs = [
-    (history_base_asr, "1. FedAvg Honesto",        "tab:blue"),
-    (history_atk_asr,  "2. Weight Scaling Attack", "tab:red"),
-    (history_sf_asr,   "3. Sentinel-Flow",         "tab:green"),
-]
-if history_puf_asr:
-    configs.append((history_puf_asr, "4. Sentinel-Flow + PUF", "tab:purple"))
-
-for ax, (history, title, color) in zip(axes, configs):
-    ax.plot(rounds, history, color=color, linewidth=1.5, alpha=0.9)
-    ax.set_title(title, fontsize=10, fontweight='bold')
-    ax.set_xlabel("Rodadas")
-    ax.set_ylabel("ASR (%)")
-    ax.set_ylim(-5, 105)
-    ax.axhline(y=60, color='gray', linestyle='--', linewidth=0.8, alpha=0.5, label='τ=60%')
-    ax.grid(True, alpha=0.3)
-    ax.legend(fontsize=8)
-
-plt.suptitle(
-    f"Evolução da Taxa de Sucesso do Ataque (ASR)\n"
-    f"{NUM_CLIENTS} Clientes | {len(POISONED_CLIENTS)} Atacantes | {COMMUNICATION_ROUNDS} Rodadas",
-    fontsize=12, fontweight='bold'
-)
-plt.tight_layout()
-plt.savefig("sentinel_puf_results.png", dpi=150, bbox_inches='tight')
-plt.show()
-print("Gráfico salvo: sentinel_puf_results.png")
+    # 5B. Smart Sybil vs Sinergia (Sentinel-Flow + PUF)
+    print("\n" + "="*60 + "\nCENÁRIO 5B: Sinergia Completa (O PUF barra a fraude)\n" + "="*60)
+    model_smpuf = create_model()
+    
+    for r in range(COMMUNICATION_ROUNDS):
+        lw = []
+        enrollment.rotate(r + 1)
+        for i in range(NUM_CLIENTS):
+            lm = create_model()
+            lm.load_state_dict(model_smpuf.state_dict())
+            train_local(lm, client_X[i], client_y_smart[i])
+            
+            if i in SMART_POISONED:
+                apply_weight_scaling(lm, model_smpuf, sf_atk)
+                trust = 1.0 # Tenta fraudar o software novamente
+                puf_ok = (i == physical_attacker_id) # Mas só tem 1 chip! O PUF pega a fraude.
+            else:
+                trust = compute_trust_score(lm, canary_X, canary_y)
+                puf_ok, _ = puf_verify(client_hardware[i], enrollment, enrolled_db)
+                
+            # A dupla verificação: precisa passar no PUF E no Comportamento
+            if puf_ok and trust >= TRUST_THRESHOLD:
+                lw.append(lm.state_dict())
+                
+        if lw: fedavg(model_smpuf, lw)
+        _, asr = evaluate(model_smpuf)
+        history_smpuf_asr.append(asr)
+        if (r + 1) % 50 == 0:
+            print(f"  Rodada {r+1}/{COMMUNICATION_ROUNDS}", end=" | ")
+            evaluate(model_smpuf, verbose=True)
+            
+    acc_smpuf, asr_smpuf = evaluate(model_smpuf)
 
 # =============================================================================
-# 12. EXPORTAR RESULTADOS PARA O VISUALIZADOR HTML (Integrado)
+# EXPORTAÇÃO E TABELA FINAL
 # =============================================================================
+print("\n" + "="*60 + "\nCOMPARATIVO FINAL DE TODOS OS CENÁRIOS\n" + "="*60)
+print("{:<35} {:>10} {:>10}".format("Cenário", "Acurácia", "ASR"))
+print("-"*57)
+print("{:<35} {:>9.2f}% {:>9.2f}%".format("1. Baseline", acc_base, asr_base))
+print("{:<35} {:>9.2f}% {:>9.2f}%".format("2. Ataque Agressivo", acc_atk, asr_atk))
+print("{:<35} {:>9.2f}% {:>9.2f}%".format("3. Sentinel-Flow", acc_sf, asr_sf))
+
+if PUF_AVAILABLE:
+    print("{:<35} {:>9.2f}% {:>9.2f}%".format("4. SF + PUF", acc_puf, asr_puf))
+    print("{:<35} {:>9.2f}% {:>9.2f}%".format("5A. Fraude de Software (Sem PUF)", acc_smsf, asr_smsf))
+    print("{:<35} {:>9.2f}% {:>9.2f}%".format("5B. Sinergia (Salvo pelo PUF)", acc_smpuf, asr_smpuf))
+
 results = {
     "generated": datetime.datetime.now().isoformat(),
-    "source": "fl_sentinel_puf.py",
-    "config": {
-        "num_clients":       NUM_CLIENTS,
-        "rounds":            COMMUNICATION_ROUNDS,
-        "poisoned_clients":  POISONED_CLIENTS,
-        "trust_threshold":   TRUST_THRESHOLD,
-        "puf_threshold":     PUF_THRESHOLD if PUF_AVAILABLE else None,
-        "puf_available":     PUF_AVAILABLE,
-    },
     "scenarios": {
-        "baseline": {
-            "accuracy": round(acc_base, 2),
-            "asr":      round(asr_base, 2),
-            "history":  [{"round": i + 1, "asr": round(v, 2)}
-                         for i, v in enumerate(history_base_asr)],
-        },
-        "attack": {
-            "accuracy": round(acc_atk, 2),
-            "asr":      round(asr_atk, 2),
-            "history":  [{"round": i + 1, "asr": round(v, 2)}
-                         for i, v in enumerate(history_atk_asr)],
-        },
-        "sentinel": {
-            "accuracy": round(acc_sf, 2),
-            "asr":      round(asr_sf, 2),
-            "history":  [{"round": i + 1, "asr": round(v, 2)}
-                         for i, v in enumerate(history_sf_asr)],
-        },
-    },
+        "1. Baseline": {"accuracy": acc_base, "asr": asr_base, "history": [{"round": i+1, "asr": v} for i, v in enumerate(history_base_asr)]},
+        "2. Ataque 4.0x": {"accuracy": acc_atk, "asr": asr_atk, "history": [{"round": i+1, "asr": v} for i, v in enumerate(history_atk_asr)]},
+        "3. Sentinel-Flow": {"accuracy": acc_sf, "asr": asr_sf, "history": [{"round": i+1, "asr": v} for i, v in enumerate(history_sf_asr)]},
+    }
 }
 
-# Adiciona cenário PUF se disponível
-if PUF_AVAILABLE and acc_puf is not None:
-    results["scenarios"]["puf"] = {
-        "accuracy": round(acc_puf, 2),
-        "asr":      round(asr_puf, 2),
-        "history":  [{"round": i + 1, "asr": round(v, 2)}
-                     for i, v in enumerate(history_puf_asr)],
-    }
+if PUF_AVAILABLE:
+    results["scenarios"].update({
+        "4. SF + PUF": {"accuracy": acc_puf, "asr": asr_puf, "history": [{"round": i+1, "asr": v} for i, v in enumerate(history_puf_asr)]},
+        "5A. Fraude de Software (Sem PUF)": {"accuracy": acc_smsf, "asr": asr_smsf, "history": [{"round": i+1, "asr": v} for i, v in enumerate(history_smsf_asr)]},
+        "5B. Sinergia (Salvo pelo PUF)": {"accuracy": acc_smpuf, "asr": asr_smpuf, "history": [{"round": i+1, "asr": v} for i, v in enumerate(history_smpuf_asr)]},
+    })
 
-output_file = "sentinel_puf_results.json"
-with open(output_file, "w", encoding="utf-8") as f:
+with open("sentinel_puf_results.json", "w", encoding="utf-8") as f:
     json.dump(results, f, indent=2, ensure_ascii=False)
 
-print("\n" + "=" * 60)
-print("EXPORTAÇÃO CONCLUÍDA")
-print("=" * 60)
-print(f"Arquivo: {output_file}")
-print(f"Cenários: {list(results['scenarios'].keys())}")
-print()
-print("Para visualizar os dados reais no HTML:")
-print("  1. Abra sentinel_puf_presentation.html no navegador")
-print("  2. Clique na aba 'Importar Dados'")
-print(f"  3. Cole o conteúdo de {output_file}")
-print("=" * 60)
+print("\nArquivo exportado: sentinel_puf_results.json")
