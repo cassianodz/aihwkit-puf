@@ -4,10 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Sentinel-Flow + Analog PUF — Thesis Visualization</title>
-<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script crossorigin src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
-<script crossorigin src="https://unpkg.com/recharts@2.10.4/umd/Recharts.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prop-types/15.8.1/prop-types.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/recharts/2.8.0/Recharts.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
 body{background:#0f172a;color:#f1f5f9;font-family:system-ui,-apple-system,sans-serif;min-height:100vh;}
@@ -40,7 +40,7 @@ textarea{background:#0f172a;color:#f1f5f9;border:1px solid #334155;border-radius
 <script>
 const el = React.createElement;
 const { useState, useEffect, useRef, useCallback, useMemo } = React;
-const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, BarChart, Bar, Legend } = window.Recharts;
+const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, BarChart, Bar, Legend } = Recharts;
 
 const ROUNDS=50, NC=20, BAD=new Set([15,16,17,18,19]);
 const NW=520, NH=400, CX=NW/2, CY=NH/2;
@@ -89,6 +89,7 @@ function simTick(r,sc,nodes){
   const updated=nodes.map(n=>{
     if(n.clientId===undefined)return n;
     
+    // O Smart Sybil frauda a atestação comportamental e tem Trust alto
     let trust = 1.0;
     if(n.isPoisoned) {
        trust = isSybil ? 0.85 + Math.random()*0.15 : 0.1 + Math.random() * 0.35;
@@ -97,7 +98,7 @@ function simTick(r,sc,nodes){
     }
 
     let blockedBeh = defBeh && trust < 0.60;
-    let blockedPuf = defPuf && n.isPoisoned; 
+    let blockedPuf = defPuf && n.isPoisoned; // Invasores não possuem o silício autêntico
     let blocked = blockedBeh || blockedPuf;
 
     return{...n,trust,blocked,blockedBy: blockedPuf ? 'puf' : blockedBeh ? 'beh' : null};
@@ -110,11 +111,12 @@ function simTick(r,sc,nodes){
 
 function NetworkSVG({nodes,parts,sc,round,stats,svgRef,onDrag}){
   const clients=nodes.filter(n=>n.clientId!==undefined);
-  const gpos=id=>id==='sdn'?SDN:id==='agg'?AGG:(nodes.find(n=>n.id===id)?.pos||SDN);
+  const sdnPos=nodes.find(n=>n.id==='sdn')?.pos||SDN, aggPos=nodes.find(n=>n.id==='agg')?.pos||AGG;
+  const gpos=id=>id==='sdn'?sdnPos:id==='agg'?aggPos:(nodes.find(n=>n.id===id)?.pos||SDN);
   return el('svg', {ref:svgRef, viewBox:`0 0 ${NW} ${NH}`, width:"100%", style:{display:'block',userSelect:'none'}},
     clients.map(n=> el('g', {key:`e${n.id}`},
-      el('line', {x1:SDN.x, y1:SDN.y, x2:n.pos.x, y2:n.pos.y, stroke:n.blocked?'#dc262640':'#33415566', strokeWidth:n.blocked?1.2:.6, strokeDasharray:n.blocked?'3,3':undefined}),
-      el('line', {x1:n.pos.x, y1:n.pos.y, x2:AGG.x, y2:AGG.y, stroke:"#33415544", strokeWidth:.5, opacity: n.blocked ? 0.2 : 0.5})
+      el('line', {x1:sdnPos.x, y1:sdnPos.y, x2:n.pos.x, y2:n.pos.y, stroke:n.blocked?'#dc262640':'#33415566', strokeWidth:n.blocked?1.2:.6, strokeDasharray:n.blocked?'3,3':undefined}),
+      el('line', {x1:n.pos.x, y1:n.pos.y, x2:aggPos.x, y2:aggPos.y, stroke:"#33415544", strokeWidth:.5, opacity: n.blocked ? 0.2 : 0.5})
     )),
     parts.map(p=>{
       const f=gpos(p.from), t=gpos(p.to); if(!f||!t)return null;
@@ -135,14 +137,14 @@ function NetworkSVG({nodes,parts,sc,round,stats,svgRef,onDrag}){
       );
     }),
     el('g', {onMouseDown:ev=>onDrag('sdn',ev), style:{cursor:'move'}},
-      el('circle', {cx:SDN.x, cy:SDN.y, r:28, fill:"#1d4ed8"}),
-      el('text', {x:SDN.x, y:SDN.y-6, textAnchor:"middle", fill:"white", fontSize:9, fontWeight:500}, "SDN"),
-      el('text', {x:SDN.x, y:SDN.y+7, textAnchor:"middle", fill:"white", fontSize:8, opacity:.85}, "Controller")
+      el('circle', {cx:sdnPos.x, cy:sdnPos.y, r:28, fill:"#1d4ed8"}),
+      el('text', {x:sdnPos.x, y:sdnPos.y-6, textAnchor:"middle", fill:"white", fontSize:9, fontWeight:500}, "SDN"),
+      el('text', {x:sdnPos.x, y:sdnPos.y+7, textAnchor:"middle", fill:"white", fontSize:8, opacity:.85}, "Controller")
     ),
     el('g', {onMouseDown:ev=>onDrag('agg',ev), style:{cursor:'move'}},
-      el('rect', {x:AGG.x-40, y:AGG.y-17, width:80, height:34, rx:5, fill:"#6d28d9"}),
-      el('text', {x:AGG.x, y:AGG.y-3, textAnchor:"middle", fill:"white", fontSize:9, fontWeight:500}, "Aggregator"),
-      el('text', {x:AGG.x, y:AGG.y+10, textAnchor:"middle", fill:"white", fontSize:8, opacity:.85}, "(FedAvg)")
+      el('rect', {x:aggPos.x-40, y:aggPos.y-17, width:80, height:34, rx:5, fill:"#6d28d9"}),
+      el('text', {x:aggPos.x, y:aggPos.y-3, textAnchor:"middle", fill:"white", fontSize:9, fontWeight:500}, "Aggregator"),
+      el('text', {x:aggPos.x, y:aggPos.y+10, textAnchor:"middle", fill:"white", fontSize:8, opacity:.85}, "(FedAvg)")
     ),
     round>0 ? el(React.Fragment, null,
       el('rect', {x:4, y:4, width:130, height:48, rx:4, fill:"#0f172a", opacity:.93}),
@@ -295,7 +297,7 @@ function LiveSim({realData}){
           sc==='sentinel'?'Sentinel-Flow ativado. Clientes desonestos contidos isolando o ataque.':
           sc==='puf'?'Defesa dupla: atestação de hardware (PUF) + comportamento.':
           sc==='sybil_sf'?'Smart Sybil emula o comportamento benigno perfeitamente. Sentinel-Flow é enganado e a rede colapsa.':
-          sc==='sybil_puf'?'PUF ativado: Smart Sybil bloqueado. Mesmo forjando o software, não consegue forjar o silício.'
+          sc==='sybil_puf'?'PUF ativado: Smart Sybil bloqueado. Mesmo forjando o software, não consegue forjar o silício.':''
         ),
         round===ROUNDS ? el('div', {style:{marginTop:10,padding:10,background:'#0f172a',borderRadius:6,display:'flex',gap:20}},
           el('div', null, el('p', {style:{fontSize:10,color:'#64748b'}}, "Accuracy"), el('p', {className:"metric", style:{color:stats.acc>80?'#22c55e':'#ef4444'}}, stats.acc, "%")),
@@ -513,7 +515,7 @@ function App(){
   const[tab,setTab]=useState('live');
   const[realData,setRealData]=useState(null);
   const tabs=[{id:'live',label:'▶ Live Simulation'},{id:'dashboard',label:'📊 Dashboard'},{id:'sybil',label:'🔐 Sybil Attack'},{id:'import',label:'⬆ Importar Dados'}];
-  return el('div', {id:"root"},
+  return el(React.Fragment, null,
     el('header', null,
       el('h1', null, "Sentinel-Flow + Analog PUF"),
       el('p', null, "Federated NIDS with behavioral and hardware attestation — Zago et al. 2026")
