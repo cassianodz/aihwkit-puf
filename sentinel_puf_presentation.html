@@ -32,6 +32,7 @@ select{background:#1e293b;color:#f1f5f9;border:1px solid #334155;border-radius:6
 .metric{font-size:24px;font-weight:600;}
 input[type=range]{accent-color:#3b82f6;}
 textarea{background:#0f172a;color:#f1f5f9;border:1px solid #334155;border-radius:6px; padding:10px;font-size:12px;font-family:monospace;width:100%;resize:vertical;}
+.scenario-grid {display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px;}
 </style>
 </head>
 <body>
@@ -45,10 +46,12 @@ const ROUNDS=50, NC=20, BAD=new Set([15,16,17,18,19]);
 const NW=520, NH=400, CX=NW/2, CY=NH/2;
 const SDN={x:CX,y:50}, AGG={x:CX,y:NH-44};
 const SCENARIOS=[
-  {id:'baseline',label:'1. Baseline',sub:'FedAvg honesto',lc:'#6b7280',asr:2.0,acc:98.6},
-  {id:'attack',label:'2. Ataque',sub:'Weight Scaling',lc:'#dc2626',asr:100,acc:53.3},
-  {id:'sentinel',label:'3. Sentinel-Flow',sub:'Canary attestation',lc:'#2563eb',asr:1.8,acc:98.7},
-  {id:'puf',label:'4. SF + PUF',sub:'Hardware + Canary',lc:'#7c3aed',asr:1.6,acc:98.8},
+  {id:'baseline',label:'1. Baseline',sub:'FedAvg honesto',lc:'#6b7280',asr:2.0,acc:98.5},
+  {id:'attack',label:'2. Ataque 4.0x',sub:'Sem defesas',lc:'#dc2626',asr:100,acc:53.3},
+  {id:'sentinel',label:'3. Sentinel-Flow',sub:'Software isolado',lc:'#2563eb',asr:1.8,acc:98.7},
+  {id:'puf',label:'4. SF + PUF',sub:'Hardware isolado',lc:'#8b5cf6',asr:1.6,acc:98.8},
+  {id:'sybil_sf',label:'5A. Fraude (Sem PUF)',sub:'Smart Sybil vs SF',lc:'#ea580c',asr:74.3,acc:52.7},
+  {id:'sybil_puf',label:'5B. Sinergia (Com PUF)',sub:'Smart Sybil vs SF+PUF',lc:'#10b981',asr:2.3,acc:98.3},
 ];
 let PID=0;
 const PC={canary:'#d97706',puf:'#2563eb',weights:'#7c3aed'};
@@ -65,20 +68,40 @@ function mkNodes(){return[
   ...Array.from({length:NC},(_,i)=>({id:`c${i}`,clientId:i,label:`C${i}`,
     isPoisoned:BAD.has(i),pos:cpos(i),trust:1,blocked:false}))
 ];}
+
 function simTick(r,sc,nodes){
   const t=r/ROUNDS,cl=nodes.filter(n=>n.clientId!==undefined);
   const ratio=cl.length?cl.filter(n=>n.isPoisoned).length/cl.length:0;
-  const rng=(s=2)=>(Math.random()-.5)*s, def=sc==='sentinel'||sc==='puf';
+  const rng=(s=2)=>(Math.random()-.5)*s;
+  
+  const defBeh = sc==='sentinel' || sc==='puf' || sc==='sybil_sf' || sc==='sybil_puf';
+  const defPuf = sc==='puf' || sc==='sybil_puf';
+  const isSybil = sc==='sybil_sf' || sc==='sybil_puf';
+
   let asr,acc;
   
   if(sc==='baseline'){ asr=Math.max(0,2+2*Math.exp(-t*6)+rng(0.5)); acc=Math.min(100,90+8.5*(1-Math.exp(-t*5))+rng(0.3)); }
   else if(sc==='attack'){ asr=Math.min(100,100*(1-Math.exp(-t*12*ratio*2))+rng(1.2)); acc=Math.max(40,98.5-45.2*(1-Math.exp(-t*10*ratio))+rng(0.5)); }
+  else if(sc==='sybil_sf') { asr=Math.min(100,74.3*(1-Math.exp(-t*15*ratio))+rng(1.5)); acc=Math.max(40,98.5-45.8*(1-Math.exp(-t*12*ratio))+rng(0.6)); }
+  else if(sc==='sybil_puf'){ asr=Math.max(0,2.35+5*Math.exp(-t*6)+rng(0.4)); acc=Math.min(100,92+6.3*(1-Math.exp(-t*4))+rng(0.3)); }
   else{ asr=Math.max(0,1.5+2*Math.exp(-t*5)+rng(sc==='puf' ? 0.3 : 0.6)); acc=Math.min(100,92+6.7*(1-Math.exp(-t*4))+rng(0.2)); }
   
   const updated=nodes.map(n=>{
     if(n.clientId===undefined)return n;
-    const trust = n.isPoisoned ? 0.1 + Math.random() * 0.35 : 0.78 + Math.random() * 0.22;
-    return{...n,trust,blocked:def&&n.isPoisoned&&trust<.6};
+    
+    // O Smart Sybil frauda a atestação comportamental e tem Trust alto
+    let trust = 1.0;
+    if(n.isPoisoned) {
+       trust = isSybil ? 0.85 + Math.random()*0.15 : 0.1 + Math.random() * 0.35;
+    } else {
+       trust = 0.78 + Math.random() * 0.22;
+    }
+
+    let blockedBeh = defBeh && trust < 0.60;
+    let blockedPuf = defPuf && n.isPoisoned; // Invasores não possuem o silício autêntico
+    let blocked = blockedBeh || blockedPuf;
+
+    return{...n,trust,blocked,blockedBy: blockedPuf ? 'puf' : blockedBeh ? 'beh' : null};
   });
   
   return{nodes:updated,asr:+asr.toFixed(1),acc:+acc.toFixed(1),
@@ -101,14 +124,15 @@ function NetworkSVG({nodes,parts,sc,round,stats,svgRef,onDrag}){
     }),
     clients.map(n=>{
       const c=ncol(n,sc), R=13, alpha = n.blocked ? 0.4 : (n.trust != null ? 0.4 + n.trust * 0.6 : 1);
+      const isPufCheck = sc==='puf' || sc==='sybil_puf';
       return el('g', {key:n.id, onMouseDown:ev=>onDrag(n.id,ev), style:{cursor:'move'}},
         !n.blocked ? el('circle', {cx:n.pos.x, cy:n.pos.y, r:R+5, fill:"none", stroke:c, strokeWidth:1.5, opacity:.18}) : null,
-        sc==='puf' && !n.blocked ? el('circle', {cx:n.pos.x, cy:n.pos.y, r:R+9, fill:"none", stroke:"#2563eb", strokeWidth:1, opacity:.13, strokeDasharray:"2,4"}) : null,
+        isPufCheck && !n.blocked ? el('circle', {cx:n.pos.x, cy:n.pos.y, r:R+9, fill:"none", stroke:"#2563eb", strokeWidth:1, opacity:.13, strokeDasharray:"2,4"}) : null,
         el('rect', {x:n.pos.x-R, y:n.pos.y-R, width:R*2, height:R*2, rx:2, fill:c, opacity:alpha}),
         el('line', {x1:n.pos.x-R, y1:n.pos.y, x2:n.pos.x-R-4, y2:n.pos.y, stroke:"white", strokeWidth:.7, opacity:.3}),
         el('line', {x1:n.pos.x+R, y1:n.pos.y, x2:n.pos.x+R+4, y2:n.pos.y, stroke:"white", strokeWidth:.7, opacity:.3}),
         el('text', {x:n.pos.x, y:n.pos.y+1, textAnchor:"middle", dominantBaseline:"middle", fill:"white", fontSize:6.5, fontWeight:500}, n.blocked?'✕':n.label),
-        sc==='puf' && !n.blocked && !n.isPoisoned && (n.trust??1)>.65 ? el('text', {x:n.pos.x+R, y:n.pos.y-R+1, fill:"#16a34a", fontSize:7, fontWeight:700}, "✓") : null
+        isPufCheck && !n.blocked && !n.isPoisoned && (n.trust??1)>.65 ? el('text', {x:n.pos.x+R, y:n.pos.y-R+1, fill:"#16a34a", fontSize:7, fontWeight:700}, "✓") : null
       );
     }),
     el('g', {onMouseDown:ev=>onDrag('sdn',ev), style:{cursor:'move'}},
@@ -158,10 +182,11 @@ function LiveSim({realData}){
     hRef.current=[...hRef.current,{round:r,asr:res.asr,acc:res.acc}];
     setHist([...hRef.current]);
     const np=[];
+    const isPufCheck = sc==='puf' || sc==='sybil_puf';
     res.nodes.forEach(n=>{
       if(n.clientId===undefined)return;
       if(Math.random()<.22)np.push({id:PID++,from:'sdn',to:n.id,type:'canary',prog:0,speed:.12+Math.random()*.06});
-      if(sc==='puf'&&Math.random()<.14)np.push({id:PID++,from:'sdn',to:n.id,type:'puf',prog:0,speed:.17+Math.random()*.06});
+      if(isPufCheck&&Math.random()<.14)np.push({id:PID++,from:'sdn',to:n.id,type:'puf',prog:0,speed:.17+Math.random()*.06});
       if(!n.blocked&&Math.random()<.16)np.push({id:PID++,from:n.id,to:'agg',type:'weights',prog:0,speed:.13+Math.random()*.05});
     });
     setParts(prev=>[...prev.filter(p=>p.prog<.97).slice(-55),...np]);
@@ -186,37 +211,28 @@ function LiveSim({realData}){
     document.addEventListener('mousemove',mv);document.addEventListener('mouseup',up);
   },[]);
 
-  const addChip=(type)=>{
-    const a=Math.random()*2*Math.PI;
-    const n={id:`cx_${Date.now()}`,clientId:nRef.current.filter(nd=>nd.clientId!==undefined).length,
-      label:'C+',isPoisoned:type==='att',pos:{x:CX+145*Math.cos(a),y:CY+105*Math.sin(a)},trust:1,blocked:false};
-    nRef.current=[...nRef.current,n];setNodes([...nRef.current]);
-  };
-
   const realScen=realData&&realData.scenarios&&realData.scenarios[sc];
   const chartData=realScen?
     realScen.history.map((h,i)=>({round:h.round,asr:h.asr,acc:hist[i]?.acc})):
     hist;
 
-  return el('div', {style:{display:'grid',gridTemplateColumns:'1fr 280px',gap:16}},
+  const isPufCheck = sc==='puf' || sc==='sybil_puf';
+
+  return el('div', {style:{display:'grid',gridTemplateColumns:'1fr 310px',gap:16}},
     el('div', null,
-      el('div', {style:{display:'flex',gap:8,marginBottom:10,flexWrap:'wrap',alignItems:'center'}},
+      el('div', {className:"scenario-grid"},
         SCENARIOS.map(s=>
-          el('button', {key:s.id, onClick:()=>{reset();setTimeout(()=>setSc(s.id),20);}, style:{fontSize:12,background:sc===s.id?s.lc+'33':'#1e293b', borderColor:sc===s.id?s.lc:'#334155',color:sc===s.id?s.lc:'#94a3b8'}},
-            el('span', {style:{fontWeight:600}}, s.label),
-            el('span', {style:{color:'#64748b',marginLeft:4,fontSize:11}}, s.sub)
+          el('button', {key:s.id, onClick:()=>{reset();setTimeout(()=>setSc(s.id),20);}, style:{fontSize:11,textAlign:'left',background:sc===s.id?s.lc+'33':'#1e293b', borderColor:sc===s.id?s.lc:'#334155',color:sc===s.id?s.lc:'#94a3b8'}},
+            el('span', {style:{fontWeight:600,display:'block'}}, s.label),
+            el('span', {style:{color:'#64748b',fontSize:10}}, s.sub)
           )
         )
       ),
-      el('div', {style:{display:'flex',gap:8,marginBottom:8,alignItems:'center'}},
-        el('span', {style:{fontSize:11,color:'#64748b'}}, "Add:"),
-        [['pcm','PCM','#16a34a'],['rem','ReRAM','#2563eb'],['att','Attacker','#dc2626']].map(([t,l,c])=>
-          el('button', {key:t, onClick:()=>addChip(t), style:{fontSize:11,display:'flex',alignItems:'center',gap:4}},
-            el('span', {style:{width:8,height:8,borderRadius:1,background:c,display:'inline-block'}}), ` + ${l}`
-          )
+      el('div', {style:{display:'flex',gap:8,marginBottom:8,alignItems:'center',justifyContent:'space-between'}},
+        el('div', {style:{display:'flex',gap:8,alignItems:'center'}},
+          el('span', {style:{fontSize:12,color:'#64748b'}}, "Round ", el('strong', {style:{color:'#f1f5f9'}}, round), `/${ROUNDS}`)
         ),
-        el('div', {style:{marginLeft:'auto',display:'flex',gap:8,alignItems:'center'}},
-          el('span', {style:{fontSize:12,color:'#64748b'}}, "Round ", el('strong', {style:{color:'#f1f5f9'}}, round), `/${ROUNDS}`),
+        el('div', {style:{display:'flex',gap:8,alignItems:'center'}},
           el('button', {onClick:()=>setRunning(r=>!r), className:running?'':'primary'}, running?'⏸ Pause':'▶ Run'),
           el('button', {onClick:reset}, "↺ Reset"),
           el('select', {value:speed, onChange:ev=>setSpeed(+ev.target.value)},
@@ -237,7 +253,7 @@ function LiveSim({realData}){
         ),
         el('div', {style:{marginLeft:'auto',fontSize:11,color:'#64748b',display:'flex',gap:10,alignItems:'center'}},
           el('span', {style:{color:'#d97706'}}, "● Canary"),
-          sc==='puf' ? el('span', {style:{color:'#2563eb'}}, "● PUF") : null,
+          isPufCheck ? el('span', {style:{color:'#2563eb'}}, "● PUF") : null,
           el('span', {style:{color:'#7c3aed'}}, "● Weights")
         )
       )
@@ -274,11 +290,13 @@ function LiveSim({realData}){
       ),
       el('div', {className:"card"},
         el('p', {style:{fontSize:12,fontWeight:500,marginBottom:6}}, SCENARIOS.find(s=>s.id===sc)?.label),
-        el('p', {style:{fontSize:11,color:'#64748b',lineHeight:1.6}},
-          sc==='baseline'?'FedAvg honesto. ASR converge para a margem base (~2%). Referência de desempenho do silício.':
-          sc==='attack'?'Clean-label poisoning + weight scaling (×4). 5 de 20 clientes comprometidos. ASR atinge 100% (Model Collapse).':
-          sc==='sentinel'?'Canary flows injetados pelo SDN. Clientes com trust < 60% bloqueados. ASR contido, mas vulnerável ao Smart Sybil.':
-          sc==='puf'?'PCM PUF challenge-response + canary comportamental. Defesa dupla barrou invasores bizantinos de software.':''
+        el('p', {style:{fontSize:11,color:'#64748b',lineHeight:1.5}},
+          sc==='baseline'?'FedAvg honesto. ASR converge para a margem base (~2%).':
+          sc==='attack'?'Weight scaling (×4) sem defesas. Model Collapse: ASR atinge 100%.':
+          sc==='sentinel'?'Sentinel-Flow ativado. Clientes desonestos contidos isolando o ataque.':
+          sc==='puf'?'Defesa dupla: atestação de hardware (PUF) + comportamento.':
+          sc==='sybil_sf'?'Smart Sybil emula o comportamento benigno perfeitamente. Sentinel-Flow é enganado e a rede colapsa.':
+          sc==='sybil_puf'?'PUF ativado: Smart Sybil bloqueado. Mesmo forjando o software, não consegue forjar o silício.'
         ),
         round===ROUNDS ? el('div', {style:{marginTop:10,padding:10,background:'#0f172a',borderRadius:6,display:'flex',gap:20}},
           el('div', null, el('p', {style:{fontSize:10,color:'#64748b'}}, "Accuracy"), el('p', {className:"metric", style:{color:stats.acc>80?'#22c55e':'#ef4444'}}, stats.acc, "%")),
@@ -291,10 +309,12 @@ function LiveSim({realData}){
 
 function Dashboard({realData}){
   const paperResults=[
-    {scenario:'Baseline',accuracy:98.55,asr:2.02},
-    {scenario:'Ataque',accuracy:53.27,asr:100.00},
-    {scenario:'Sentinel-Flow',accuracy:98.70,asr:1.77},
-    {scenario:'SF + PUF',accuracy:98.77,asr:1.56},
+    {scenario:'1. Baseline',accuracy:98.55,asr:2.02},
+    {scenario:'2. Ataque',accuracy:53.27,asr:100.00},
+    {scenario:'3. SF (Soft)',accuracy:98.70,asr:1.77},
+    {scenario:'4. SF+PUF',accuracy:98.77,asr:1.56},
+    {scenario:'5A. Fraude',accuracy:52.69,asr:74.29},
+    {scenario:'5B. Sinergia',accuracy:98.33,asr:2.35},
   ];
   const displayResults=realData&&realData.scenarios?
     Object.entries(realData.scenarios).map(([k,v])=>({
@@ -302,28 +322,27 @@ function Dashboard({realData}){
       accuracy:v.accuracy,asr:v.asr
     })):paperResults;
 
-  const accData=displayResults.map(r=>({name:r.scenario.replace('Sentinel-Flow','SF'),accuracy:r.accuracy}));
-  const asrData=displayResults.map(r=>({name:r.scenario.replace('Sentinel-Flow','SF'),asr:r.asr}));
-  const lc=['#6b7280','#dc2626','#2563eb','#7c3aed'];
+  const accData=displayResults.map(r=>({name:r.scenario,accuracy:r.accuracy}));
+  const asrData=displayResults.map(r=>({name:r.scenario,asr:r.asr}));
+  const lc=['#6b7280','#dc2626','#2563eb','#8b5cf6','#ea580c','#10b981'];
 
   return el('div', null,
     el('div', {style:{marginBottom:16}},
       el('h3', {style:{fontSize:15,fontWeight:500,marginBottom:4}}, "Resultados Finais"),
       el('p', {style:{fontSize:12,color:'#64748b'}}, realData?'Dados reais do experimento Python carregados.':'Valores do artigo (Zago et al. 2026). Importe dados reais na aba "Importar Dados".')
     ),
-    el('div', {style:{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12,marginBottom:20}},
+    el('div', {style:{display:'grid',gridTemplateColumns:'repeat(6,1fr)',gap:8,marginBottom:20}},
       displayResults.map((r,i)=>
-        el('div', {key:r.scenario, className:"card", style:{borderColor:lc[i]+'55'}},
-          el('p', {style:{fontSize:11,color:lc[i],fontWeight:600,marginBottom:8}}, r.scenario),
+        el('div', {key:r.scenario, className:"card", style:{borderColor:lc[i]+'55',padding:'10px'}},
+          el('p', {style:{fontSize:10,color:lc[i],fontWeight:600,marginBottom:8,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}, r.scenario),
           el('div', {style:{marginBottom:6}},
-            el('p', {style:{fontSize:10,color:'#64748b'}}, "Accuracy"),
-            el('p', {className:"metric", style:{color:r.accuracy>80?'#22c55e':'#ef4444'}}, r.accuracy, "%")
+            el('p', {style:{fontSize:9,color:'#64748b'}}, "Accuracy"),
+            el('p', {className:"metric", style:{fontSize:18,color:r.accuracy>80?'#22c55e':'#ef4444'}}, r.accuracy, "%")
           ),
           el('div', null,
-            el('p', {style:{fontSize:10,color:'#64748b'}}, "ASR"),
-            el('p', {className:"metric", style:{color:r.asr<20?'#22c55e':'#ef4444'}}, r.asr, "%")
-          ),
-          el('p', {style:{fontSize:11,marginTop:8,color:r.asr<20&&r.accuracy>80?'#22c55e':'#ef4444'}}, r.asr<20&&r.accuracy>80?'✓ Defendido':'⚠ Comprometido')
+            el('p', {style:{fontSize:9,color:'#64748b'}}, "ASR"),
+            el('p', {className:"metric", style:{fontSize:18,color:r.asr<20?'#22c55e':'#ef4444'}}, r.asr, "%")
+          )
         )
       )
     ),
@@ -334,7 +353,7 @@ function Dashboard({realData}){
           el(ResponsiveContainer, {width:"100%", height:"100%"},
             el(BarChart, {data:accData, margin:{top:4,right:8,bottom:20,left:0}},
               el(CartesianGrid, {strokeDasharray:"2 2", stroke:"#1e293b"}),
-              el(XAxis, {dataKey:"name", tick:{fontSize:10,fill:'#64748b'}, angle:-15, textAnchor:"end"}),
+              el(XAxis, {dataKey:"name", tick:{fontSize:9,fill:'#64748b'}, angle:-20, textAnchor:"end"}),
               el(YAxis, {domain:[0,100], tick:{fontSize:10,fill:'#64748b'}, width:28}),
               el(Tooltip, {contentStyle:{background:'#1e293b',border:'1px solid #334155',fontSize:11}}),
               el(Bar, {dataKey:"accuracy", fill:"#3b82f6", radius:[3,3,0,0]})
@@ -348,7 +367,7 @@ function Dashboard({realData}){
           el(ResponsiveContainer, {width:"100%", height:"100%"},
             el(BarChart, {data:asrData, margin:{top:4,right:8,bottom:20,left:0}},
               el(CartesianGrid, {strokeDasharray:"2 2", stroke:"#1e293b"}),
-              el(XAxis, {dataKey:"name", tick:{fontSize:10,fill:'#64748b'}, angle:-15, textAnchor:"end"}),
+              el(XAxis, {dataKey:"name", tick:{fontSize:9,fill:'#64748b'}, angle:-20, textAnchor:"end"}),
               el(YAxis, {domain:[0,110], tick:{fontSize:10,fill:'#64748b'}, width:28}),
               el(Tooltip, {contentStyle:{background:'#1e293b',border:'1px solid #334155',fontSize:11}}),
               el(Bar, {dataKey:"asr", fill:"#ef4444", radius:[3,3,0,0]})
@@ -482,33 +501,11 @@ function ImportTab({onData,realData}){
       el('span', {style:{color:'#64748b'}}, Object.keys(realData.scenarios||{}).join(', ') + ' — ' + (realData.generated||'')),
       el('button', {onClick:clear, style:{marginLeft:12,fontSize:11}}, "Remover")
     ) : null,
-    el('textarea', {value:json, onChange:ev=>setJson(ev.target.value), rows:14, placeholder:'{\n  "generated": "...",\n  "scenarios": {\n    "baseline": { "accuracy": 98.55, "asr": 2.02, "history": [...] },\n    "attack": { ... },\n    "sentinel": { ... },\n    "puf": { ... }\n  }\n}'}),
+    el('textarea', {value:json, onChange:ev=>setJson(ev.target.value), rows:16, placeholder:'{\n  "generated": "...",\n  "scenarios": {\n    "baseline": { "accuracy": 98.55, "asr": 2.02, "history": [...] },\n    "sybil_sf": { "accuracy": 52.69, "asr": 74.29, "history": [...] },\n    "sybil_puf": { "accuracy": 98.33, "asr": 2.35, "history": [...] }\n  }\n}'}),
     err ? el('p', {style:{color:'#ef4444',fontSize:12,marginTop:6}}, err) : null,
     el('div', {style:{display:'flex',gap:8,marginTop:10}},
       el('button', {onClick:parse, className:"primary", disabled:!json}, "Carregar JSON"),
       el('button', {onClick:()=>setJson('')}, "Limpar")
-    ),
-    el('div', {style:{marginTop:20,padding:12,background:'#1e293b',borderRadius:8}},
-      el('p', {style:{fontSize:12,fontWeight:500,marginBottom:8}}, "Adicione ao final de ", el('code', null, "fl_sentinel_puf.py"), ":"),
-      el('pre', {style:{fontSize:11,color:'#94a3b8',overflow:'auto',lineHeight:1.6}}, `import json, datetimeresults = {
-    "generated": datetime.datetime.now().isoformat(),
-    "config": {"num_clients": NUM_CLIENTS, "rounds": COMMUNICATION_ROUNDS},
-    "scenarios": {
-        "baseline":  {"accuracy": acc_base, "asr": asr_base,
-                      "history": [{"round":i+1,"asr":v} for i,v in enumerate(history_base_asr)]},
-        "attack":    {"accuracy": acc_atk,  "asr": asr_atk,
-                      "history": [{"round":i+1,"asr":v} for i,v in enumerate(history_atk_asr)]},
-        "sentinel":  {"accuracy": acc_sf,   "asr": asr_sf,
-                      "history": [{"round":i+1,"asr":v} for i,v in enumerate(history_sf_asr)]},
-    }
-}
-if acc_puf:
-    results["scenarios"]["puf"] = {
-        "accuracy": acc_puf, "asr": asr_puf,
-        "history": [{"round":i+1,"asr":v} for i,v in enumerate(history_puf_asr)]}
-with open("sentinel_puf_results.json","w") as f:
-    json.dump(results,f,indent=2)
-print("Exportado: sentinel_puf_results.json")`)
     )
   );
 }
@@ -520,7 +517,7 @@ function App(){
   return el('div', {id:"root"},
     el('header', null,
       el('h1', null, "Sentinel-Flow + Analog PUF"),
-      el('p', null, "Federated NIDS with behavioral and hardware attestation — Zago et al. 2026 + PUF extension")
+      el('p', null, "Federated NIDS with behavioral and hardware attestation — Zago et al. 2026")
     ),
     el('nav', {className:"tabs"},
       tabs.map(t=> el('button', {key:t.id, className:`tab${tab===t.id?' active':''}`, onClick:()=>setTab(t.id)}, t.label))
