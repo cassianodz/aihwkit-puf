@@ -4,10 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Sentinel-Flow + Analog PUF — Thesis Visualization</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/prop-types/15.8.1/prop-types.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/recharts/2.8.0/Recharts.js"></script>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
+<script crossorigin src="https://unpkg.com/recharts@2.10.4/umd/Recharts.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
 body{background:#0f172a;color:#f1f5f9;font-family:system-ui,-apple-system,sans-serif;min-height:100vh;}
@@ -40,7 +40,7 @@ textarea{background:#0f172a;color:#f1f5f9;border:1px solid #334155;border-radius
 <script>
 const el = React.createElement;
 const { useState, useEffect, useRef, useCallback, useMemo } = React;
-const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, BarChart, Bar, Legend } = Recharts;
+const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, BarChart, Bar, Legend } = window.Recharts;
 
 const ROUNDS=50, NC=20, BAD=new Set([15,16,17,18,19]);
 const NW=520, NH=400, CX=NW/2, CY=NH/2;
@@ -89,7 +89,6 @@ function simTick(r,sc,nodes){
   const updated=nodes.map(n=>{
     if(n.clientId===undefined)return n;
     
-    // O Smart Sybil frauda a atestação comportamental e tem Trust alto
     let trust = 1.0;
     if(n.isPoisoned) {
        trust = isSybil ? 0.85 + Math.random()*0.15 : 0.1 + Math.random() * 0.35;
@@ -98,7 +97,7 @@ function simTick(r,sc,nodes){
     }
 
     let blockedBeh = defBeh && trust < 0.60;
-    let blockedPuf = defPuf && n.isPoisoned; // Invasores não possuem o silício autêntico
+    let blockedPuf = defPuf && n.isPoisoned; 
     let blocked = blockedBeh || blockedPuf;
 
     return{...n,trust,blocked,blockedBy: blockedPuf ? 'puf' : blockedBeh ? 'beh' : null};
