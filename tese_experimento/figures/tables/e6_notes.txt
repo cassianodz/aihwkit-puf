@@ -1,0 +1,1 @@
+digital accuracy 99.31%, PCMPreset 98.68%; largest |GDC on - GDC off| difference 1.09 pp over the grid
